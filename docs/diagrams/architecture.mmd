@@ -1,0 +1,18 @@
+flowchart LR
+  user["User device<br/>WireGuard client"]
+  internet["Internet"]
+  vps["Single Linux VPS<br/>public IP"]
+  engine["KinTunnel engine<br/>privileged WireGuard runtime"]
+  admin["KinTunnel admin<br/>unprivileged UI and API"]
+  wgtools["Standard WireGuard tooling"]
+  config["Persistent config volume<br/>keys, peers, settings"]
+  proxy["Optional HTTPS reverse proxy<br/>Dokploy/Traefik/Caddy"]
+
+  user -->|UDP 51820| internet
+  internet -->|UDP 51820| vps
+  vps --> engine
+  engine --> wgtools
+  engine --> config
+  proxy -->|protected HTTPS| admin
+  admin -->|internal API| engine
+  engine -->|NAT egress| internet

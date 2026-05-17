@@ -1,0 +1,16 @@
+sequenceDiagram
+  participant Client as User device
+  participant WG as WireGuard tunnel
+  participant VPS as Linux VPS
+  participant NAT as VPS NAT
+  participant Site as Public internet
+
+  Client->>WG: Send packet to 0.0.0.0/0 route
+  WG->>VPS: Encrypted UDP 51820
+  VPS->>NAT: Decrypt and forward
+  NAT->>Site: Egress from VPS public IP
+  Site-->>NAT: Response to VPS public IP
+  NAT-->>VPS: Reverse NAT
+  VPS-->>WG: Encrypt response
+  WG-->>Client: Deliver packet to client
+

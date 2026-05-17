@@ -1,0 +1,18 @@
+flowchart TD
+  request["User requests access"]
+  approve["Admin approves trusted user/device"]
+  peer["Create one WireGuard peer for the device"]
+  qr["Show QR code or export config"]
+  install["User installs official WireGuard client"]
+  import["User imports profile"]
+  test["User connects and checks public IP"]
+  maintain["Admin records owner and device name"]
+
+  request --> approve
+  approve --> peer
+  peer --> qr
+  qr --> install
+  install --> import
+  import --> test
+  test --> maintain
+

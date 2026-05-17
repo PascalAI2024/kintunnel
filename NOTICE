@@ -1,0 +1,14 @@
+KinTunnel
+Copyright 2026 KinTunnel contributors
+
+This product is licensed under the Apache License, Version 2.0.
+
+KinTunnel uses the KINTUNNEL environment variable namespace and the kintunnel
+package, path, image, and volume namespace in deployment examples.
+
+WireGuard is a registered trademark of Jason A. Donenfeld. This project is
+not affiliated with, endorsed by, sponsored by, or approved by Jason A.
+Donenfeld or the WireGuard project. References to WireGuard are made only to
+describe compatibility with the WireGuard protocol and ecosystem.
+
+This project does not copy code from wg-easy.

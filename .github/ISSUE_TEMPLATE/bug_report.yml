@@ -1,0 +1,69 @@
+name: Bug report
+description: Report a reproducible defect in KinTunnel.
+title: "[Bug]: "
+labels: ["type: bug", "status: needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please keep security-sensitive details out of public issues.
+        Use the security policy for vulnerabilities or exposed secrets.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+      placeholder: The service fails to...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Include commands, configuration shape, and observed output where possible.
+      placeholder: |
+        1. Configure...
+        2. Run...
+        3. Observe...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Documentation
+        - Deployment
+        - Configuration
+        - Networking
+        - Security
+        - CI / Release
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, container runtime, orchestration target, and relevant versions.
+      placeholder: |
+        OS:
+        Docker / Podman:
+        Deployment target:
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Redact secrets, keys, hostnames, and public IPs before posting.
+      render: text
+    validations:
+      required: false

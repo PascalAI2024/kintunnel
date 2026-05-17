@@ -1,0 +1,28 @@
+# KinTunnel application config example.
+# Copy to config/kintunnel.yml and adjust for the host.
+
+server:
+  publicEndpoint: vpn.example.com
+  wireguardPort: 51820
+  interface: wg0
+  address: 10.44.0.1/24
+  mtu: 1420
+
+clients:
+  addressPool: 10.44.0.0/24
+  defaultDns:
+    - 1.1.1.1
+  defaultAllowedIps:
+    - 0.0.0.0/0
+  persistentKeepalive: 25
+
+admin:
+  bind: 0.0.0.0
+  port: 8080
+  requireReverseProxy: true
+  trustedProxyCidrs:
+    - 127.0.0.1/32
+
+storage:
+  dataDir: /var/lib/kintunnel
+  backupDir: /backups

@@ -1,0 +1,34 @@
+flowchart TB
+  subgraph client_zone["User device boundary"]
+    client["WireGuard app"]
+    peerkey["Peer private key"]
+  end
+
+  subgraph public_zone["Public internet"]
+    udp["UDP 51820"]
+    https["Optional HTTPS admin route"]
+  end
+
+  subgraph server_zone["VPS boundary"]
+    engine["KinTunnel engine / WireGuard"]
+    adminsvc["KinTunnel admin service"]
+    firewall["Host firewall"]
+    volume["Persistent config volume"]
+  end
+
+  subgraph admin_zone["Admin boundary"]
+    admin["Trusted administrator"]
+    backups["Encrypted backups"]
+  end
+
+  client --> peerkey
+  client --> udp
+  udp --> firewall
+  firewall --> engine
+  https --> adminsvc
+  adminsvc --> engine
+  engine --> volume
+  adminsvc --> volume
+  admin --> https
+  admin --> backups
+  volume --> backups

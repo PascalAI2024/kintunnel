@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  repository-hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inventory Markdown and YAML
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Markdown files:"
+          find . -path './.git' -prune -o -type f \( -name '*.md' -o -name '*.markdown' \) -print | sort
+          echo
+          echo "YAML files:"
+          find . -path './.git' -prune -o -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort
+
+      - name: Validate YAML syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find . -path './.git' -prune -o -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No YAML files found."
+            exit 0
+          fi
+          ruby -e 'require "yaml"; ARGV.each { |file| YAML.load_file(file); puts "ok #{file}" }' "${files[@]}"
+
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find scripts -type f -name '*.sh' -print 2>/dev/null | sort || true)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No shell scripts found."
+            exit 0
+          fi
+          for file in "${files[@]}"; do
+            bash -n "$file"
+            echo "ok $file"
+          done
+
+      - name: Markdown lint placeholder
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Markdown linting is intentionally a placeholder until the repo selects a formatter/linter."
+          echo "Recommended future options: markdownlint-cli2, lychee for links, or pre-commit."

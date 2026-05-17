@@ -1,0 +1,28 @@
+site_name: KinTunnel
+site_description: Operator documentation for KinTunnel.
+repo_url: https://github.com/PascalAI2024/kintunnel
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: mkdocs
+
+nav:
+  - Home: index.md
+  - Quick Start: quick-start.md
+  - Architecture: architecture.md
+  - Research: vpn-research.md
+  - Installation:
+      - Docker Compose: installation/docker-compose.md
+      - Dokploy Swarm: installation/dokploy-swarm.md
+  - Configuration:
+      - Environment Variables: configuration/environment-variables.md
+      - Full Tunnel: configuration/full-tunnel.md
+      - Split Tunnel: configuration/split-tunnel.md
+  - Operations:
+      - Backups: operations/backups.md
+  - Security:
+      - Security Model: security/security-model.md
+  - Troubleshooting:
+      - Overview: troubleshooting/index.md

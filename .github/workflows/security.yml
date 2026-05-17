@@ -1,0 +1,41 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  placeholders:
+    name: Security placeholders
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Secret scan placeholder
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Secret scanning is reserved for the repository host settings and a future committed scanner policy."
+          echo "Suggested future tools: GitHub secret scanning, gitleaks, trufflehog."
+          echo "This placeholder avoids blocking early repository work before baseline findings are reviewed."
+
+      - name: Container scan placeholder
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f Dockerfile ]; then
+            echo "Dockerfile found. Future container scan should run after an image build."
+            echo "Suggested future tools: Trivy or Grype with SARIF upload."
+          else
+            echo "No root Dockerfile found. Container scan skipped."
+          fi

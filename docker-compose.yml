@@ -1,0 +1,100 @@
+# KinTunnel Docker Compose MVP.
+#
+# KinTunnel uses KINTUNNEL_* environment variables and lowercase kintunnel
+# image, path, volume, and container names:
+#   ghcr.io/pascalai2024/kintunnel-engine:dev
+#   ghcr.io/pascalai2024/kintunnel-admin:dev
+#
+# Minimal VPS:
+#   cp .env.example .env
+#   docker compose --profile admin up -d
+#
+# Dokploy / Swarm:
+#   Prefer compose/dokploy-swarm.yml as a starting point.
+#   Keep the VPN engine at one replica. WireGuard state, UDP ownership, and NAT
+#   are not a scale-out web workload, tempting though that illusion may be.
+
+name: ${COMPOSE_PROJECT_NAME:-kintunnel}
+
+services:
+  engine:
+    image: ${KINTUNNEL_ENGINE_IMAGE:-ghcr.io/pascalai2024/kintunnel-engine:dev}
+    container_name: ${KINTUNNEL_ENGINE_CONTAINER:-kintunnel-engine}
+    restart: unless-stopped
+    init: true
+    environment:
+      KINTUNNEL_ENV: ${KINTUNNEL_ENV:-production}
+      KINTUNNEL_PUBLIC_ENDPOINT: ${KINTUNNEL_PUBLIC_ENDPOINT:?set KINTUNNEL_PUBLIC_ENDPOINT in .env}
+      KINTUNNEL_WG_INTERFACE: ${KINTUNNEL_WG_INTERFACE:-wg0}
+      KINTUNNEL_WG_PORT: ${KINTUNNEL_WG_PORT:-51820}
+      KINTUNNEL_WG_ADDRESS: ${KINTUNNEL_WG_ADDRESS:-10.44.0.1/24}
+      KINTUNNEL_WG_DNS: ${KINTUNNEL_WG_DNS:-1.1.1.1}
+      KINTUNNEL_ALLOWED_IPS: ${KINTUNNEL_ALLOWED_IPS:-0.0.0.0/0}
+      KINTUNNEL_DATA_DIR: /var/lib/kintunnel
+      KINTUNNEL_CONFIG_FILE: /etc/kintunnel/kintunnel.yml
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./config:/etc/kintunnel:ro
+      - kintunnel-data:/var/lib/kintunnel
+      - kintunnel-backups:/backups
+    ports:
+      - target: 51820
+        published: ${KINTUNNEL_WG_PORT:-51820}
+        protocol: udp
+        mode: host
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv4.conf.all.src_valid_mark: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "kintunnel-engine healthcheck || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - control
+
+  admin:
+    image: ${KINTUNNEL_ADMIN_IMAGE:-ghcr.io/pascalai2024/kintunnel-admin:dev}
+    container_name: ${KINTUNNEL_ADMIN_CONTAINER:-kintunnel-admin}
+    restart: unless-stopped
+    init: true
+    profiles:
+      - admin
+    environment:
+      KINTUNNEL_ENV: ${KINTUNNEL_ENV:-production}
+      KINTUNNEL_ADMIN_BIND: 0.0.0.0
+      KINTUNNEL_ADMIN_PORT: 8080
+      KINTUNNEL_ENGINE_URL: http://engine:9090
+      KINTUNNEL_SESSION_SECRET_FILE: /run/secrets/kintunnel_session_secret
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./config:/etc/kintunnel:ro
+    ports:
+      # Localhost by default. Put Caddy, Traefik, Dokploy, or an SSH tunnel in
+      # front of this before exposing it. The internet contains opinions.
+      - "${KINTUNNEL_ADMIN_BIND_HOST:-127.0.0.1}:${KINTUNNEL_ADMIN_PORT:-8080}:8080/tcp"
+    secrets:
+      - kintunnel_session_secret
+    depends_on:
+      engine:
+        condition: service_healthy
+    networks:
+      - control
+
+networks:
+  control:
+    driver: bridge
+    internal: false
+
+volumes:
+  kintunnel-data:
+  kintunnel-backups:
+
+secrets:
+  kintunnel_session_secret:
+    file: ${KINTUNNEL_SESSION_SECRET_FILE:-./config/secrets/session-secret.txt}

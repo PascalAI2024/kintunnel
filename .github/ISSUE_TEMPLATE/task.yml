@@ -1,0 +1,30 @@
+name: Project task
+description: Track implementation, documentation, or release work.
+title: "[Task]: "
+labels: ["type: task", "status: needs triage"]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What should be true when this is complete?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: List the files, docs, workflows, or systems expected to change.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: How should reviewers verify this?
+      placeholder: |
+        - [ ] Documentation renders
+        - [ ] Workflow dry run reviewed
+        - [ ] Manual deployment notes updated
+    validations:
+      required: false

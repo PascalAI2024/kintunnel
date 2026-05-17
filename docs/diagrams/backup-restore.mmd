@@ -1,0 +1,13 @@
+flowchart LR
+  live["Live KinTunnel data volume"]
+  archive["Backup archive"]
+  encrypt["Encrypted backup"]
+  offsite["Off-VPS storage"]
+  restore["Restore to replacement VPS"]
+  verify["Verify peer handshakes and egress IP"]
+
+  live --> archive
+  archive --> encrypt
+  encrypt --> offsite
+  offsite --> restore
+  restore --> verify

@@ -1,0 +1,19 @@
+# Minimal single-node VPS overlay.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f compose/minimal-vps.yml --profile admin up -d
+#
+# Host prerequisites:
+#   - UDP ${KINTUNNEL_WG_PORT:-51820} open on the VPS firewall.
+#   - /dev/net/tun present.
+#   - IPv4 forwarding enabled on the host.
+#   - Admin UI kept on localhost, then reached by SSH tunnel or HTTPS proxy.
+
+services:
+  engine:
+    restart: unless-stopped
+
+  admin:
+    restart: unless-stopped
+    ports:
+      - "${KINTUNNEL_ADMIN_BIND_HOST:-127.0.0.1}:${KINTUNNEL_ADMIN_PORT:-8080}:8080/tcp"
