@@ -23,9 +23,13 @@ KinTunnel is not trying to be:
 - A WireGuard replacement.
 - A copy of an existing admin UI.
 
-## Quick Start
+## Project Status
 
-The project is still being scaffolded. Until runtime packages land, use this as the intended local development shape:
+KinTunnel is currently in the public scaffold and architecture phase. The repository is ready to show, discuss, and build from, but the runtime engine/admin images are not published yet.
+
+## Preview Deployment Shape
+
+Once runtime packages land, the local development shape is intended to be:
 
 ```bash
 git clone https://github.com/PascalAI2024/kintunnel.git
@@ -34,7 +38,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Expected production shape:
+The expected production shape will be:
 
 ```bash
 docker compose pull
