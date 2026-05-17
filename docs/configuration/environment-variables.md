@@ -4,17 +4,29 @@ These variables configure the MVP deployment. The `KINTUNNEL_*` namespace is the
 
 | Variable | Required | Example | Purpose |
 |---|---:|---|---|
-| `KINTUNNEL_PUBLIC_ENDPOINT` | Yes | `vpn.example.com` | Public DNS name or IP clients use to reach the VPS. |
-| `KINTUNNEL_SESSION_SECRET_FILE` | Yes | `./config/secrets/session-secret.txt` | File containing the admin session secret. |
-| `KINTUNNEL_WG_PORT` | No | `51820` | UDP WireGuard listen port. |
+| `KINTUNNEL_DRY_RUN` | No | `true` | Runs the engine without changing host networking. Recommended for MVP evaluation. |
+| `KINTUNNEL_PUBLIC_ENDPOINT` | Yes for Compose | `vpn.example.com` | Public DNS name or IP clients use to reach the VPS. The included Compose file maps this into the runtime endpoint host. |
+| `KINTUNNEL_ENDPOINT_HOST` | Yes for direct engine runs | `vpn.example.com` | Runtime endpoint host written into client configs when running the engine outside the included Compose file. |
+| `KINTUNNEL_ADMIN_TOKEN` | Yes | `change-me` | Bearer token used to sign in to the admin UI. Prefer a secret file in deployments. |
+| `KINTUNNEL_ADMIN_TOKEN_FILE` | No | `/run/secrets/kintunnel_admin_token` | File containing the admin token. |
+| `KINTUNNEL_WG_PORT` | No | `51820` | Compose convenience value for both published UDP port and runtime endpoint/listen port. |
+| `KINTUNNEL_WG_LISTEN_PORT` | No | `51820` | UDP WireGuard listen port. |
+| `KINTUNNEL_ENDPOINT_PORT` | No | `51820` | Endpoint port written into client configs. |
 | `KINTUNNEL_ADMIN_BIND_HOST` | No | `127.0.0.1` | Host interface for the admin service when published by Compose. |
+| `KINTUNNEL_ADMIN_BIND` | No | `0.0.0.0` | Interface the admin process binds inside the container or dev shell. |
 | `KINTUNNEL_ADMIN_PORT` | No | `8080` | Admin service port. |
+| `KINTUNNEL_ENGINE_PORT` | No | `9090` | Engine service port. |
+| `KINTUNNEL_ENGINE_URL` | No | `http://engine:9090` | Engine URL used by the admin service. |
+| `KINTUNNEL_DATA_DIR` | No | `/var/lib/kintunnel` | Directory containing engine state. |
 | `KINTUNNEL_WG_INTERFACE` | No | `wg0` | WireGuard interface name managed by the engine. |
-| `KINTUNNEL_WG_ADDRESS` | No | `10.44.0.1/24` | Server tunnel address and peer allocation subnet. |
-| `KINTUNNEL_WG_DNS` | No | `1.1.1.1` | DNS server pushed to clients. |
+| `KINTUNNEL_WG_ADDRESS` | No | `10.44.0.0/24` | Tunnel CIDR used for server and peer allocation. |
+| `KINTUNNEL_WG_DNS` | No | `1.1.1.1` | Compose convenience value mapped into runtime DNS servers. |
+| `KINTUNNEL_DNS_SERVERS` | No | `1.1.1.1` | DNS server list pushed to clients. |
 | `KINTUNNEL_ALLOWED_IPS` | No | `0.0.0.0/0` | Client route set. Full tunnel by default. |
-| `KINTUNNEL_ENGINE_IMAGE` | No | `ghcr.io/pascalai2024/kintunnel-engine:dev` | Engine image used by Compose. |
-| `KINTUNNEL_ADMIN_IMAGE` | No | `ghcr.io/pascalai2024/kintunnel-admin:dev` | Admin image used by Compose. |
+| `KINTUNNEL_ENGINE_IMAGE` | No | `ghcr.io/pascalai2024/kintunnel-engine:v0.1.0` | Engine image used by Compose or Swarm when pulling a published release image. |
+| `KINTUNNEL_ADMIN_IMAGE` | No | `ghcr.io/pascalai2024/kintunnel-admin:v0.1.0` | Admin image used by Compose or Swarm when pulling a published release image. |
+
+The included Compose files accept convenience names such as `KINTUNNEL_PUBLIC_ENDPOINT`, `KINTUNNEL_WG_PORT`, and `KINTUNNEL_WG_DNS`, then map them to runtime variables. Direct Node runs should use the runtime names.
 
 ## Full Tunnel Defaults
 
@@ -44,4 +56,4 @@ If DNS filtering is added later, document it as an explicit feature. Do not impl
 
 ## Admin Secrets
 
-Store the session secret in the file referenced by `KINTUNNEL_SESSION_SECRET_FILE`. Keep generated secrets out of public documentation, tickets, screenshots, and shell history where possible.
+Store the admin token in `KINTUNNEL_ADMIN_TOKEN_FILE` for deployments where possible. Keep generated secrets out of public documentation, tickets, screenshots, and shell history.

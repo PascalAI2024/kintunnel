@@ -2,6 +2,29 @@
 
 Docker Compose is the recommended install path for the MVP.
 
+The current runtime is real, but dry-run should remain enabled for evaluation until non-dry-run reconcile is hardened. In dry-run, the engine persists state and renders client configs without touching WireGuard, firewall, forwarding, or NAT state.
+
+This repository includes Dockerfiles for both runtime services. The default
+Compose file builds local images from source. Published GHCR images are a
+release artifact once tags are cut; a source checkout does not need them.
+
+Build the TypeScript runtime locally before container work:
+
+```sh
+npm ci
+npm run build
+```
+
+Build and run the included Compose stack with:
+
+```sh
+cp .env.example .env
+mkdir -p config/secrets
+openssl rand -base64 32 > config/secrets/admin-token.txt
+docker compose --profile admin build
+docker compose --profile admin up -d
+```
+
 ## Host Preparation
 
 Open the required ports on the VPS firewall:
@@ -27,38 +50,46 @@ sudo sysctl --system
 
 ## Compose File
 
-Create `compose.yml`:
+The repository root already includes `docker-compose.yml`. If you need a
+standalone reference file, keep the environment mapping aligned with the same
+runtime variables:
 
 ```yaml
 services:
   engine:
-    image: ${KINTUNNEL_ENGINE_IMAGE:-ghcr.io/pascalai2024/kintunnel-engine:dev}
+    image: ${KINTUNNEL_ENGINE_IMAGE:-kintunnel-engine:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.engine
     container_name: ${KINTUNNEL_ENGINE_CONTAINER:-kintunnel-engine}
     restart: unless-stopped
     environment:
-      KINTUNNEL_PUBLIC_ENDPOINT: ${KINTUNNEL_PUBLIC_ENDPOINT}
+      KINTUNNEL_DRY_RUN: ${KINTUNNEL_DRY_RUN:-true}
+      KINTUNNEL_ENDPOINT_HOST: ${KINTUNNEL_PUBLIC_ENDPOINT}
+      KINTUNNEL_ENDPOINT_PORT: ${KINTUNNEL_WG_PORT:-51820}
       KINTUNNEL_WG_INTERFACE: ${KINTUNNEL_WG_INTERFACE:-wg0}
-      KINTUNNEL_WG_PORT: ${KINTUNNEL_WG_PORT:-51820}
+      KINTUNNEL_WG_LISTEN_PORT: ${KINTUNNEL_WG_PORT:-51820}
       KINTUNNEL_WG_ADDRESS: ${KINTUNNEL_WG_ADDRESS:-10.44.0.1/24}
-      KINTUNNEL_WG_DNS: ${KINTUNNEL_WG_DNS:-1.1.1.1}
+      KINTUNNEL_DNS_SERVERS: ${KINTUNNEL_WG_DNS:-1.1.1.1}
       KINTUNNEL_ALLOWED_IPS: ${KINTUNNEL_ALLOWED_IPS:-0.0.0.0/0}
       KINTUNNEL_DATA_DIR: /var/lib/kintunnel
-      KINTUNNEL_CONFIG_FILE: /etc/kintunnel/kintunnel.yml
     volumes:
       - ./config:/etc/kintunnel:ro
       - kintunnel-data:/var/lib/kintunnel
       - kintunnel-backups:/backups
     ports:
-      - "${KINTUNNEL_WG_PORT:-51820}:51820/udp"
+      - "${KINTUNNEL_WG_PORT:-51820}:${KINTUNNEL_WG_PORT:-51820}/udp"
     cap_add:
       - NET_ADMIN
-      - SYS_MODULE
     sysctls:
       net.ipv4.ip_forward: "1"
       net.ipv4.conf.all.src_valid_mark: "1"
 
   admin:
-    image: ${KINTUNNEL_ADMIN_IMAGE:-ghcr.io/pascalai2024/kintunnel-admin:dev}
+    image: ${KINTUNNEL_ADMIN_IMAGE:-kintunnel-admin:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.admin
     container_name: ${KINTUNNEL_ADMIN_CONTAINER:-kintunnel-admin}
     restart: unless-stopped
     depends_on:
@@ -67,21 +98,21 @@ services:
       KINTUNNEL_ADMIN_BIND: 0.0.0.0
       KINTUNNEL_ADMIN_PORT: 8080
       KINTUNNEL_ENGINE_URL: http://engine:9090
-      KINTUNNEL_SESSION_SECRET_FILE: /run/secrets/kintunnel_session_secret
+      KINTUNNEL_ADMIN_TOKEN_FILE: /run/secrets/kintunnel_admin_token
     volumes:
       - ./config:/etc/kintunnel:ro
     ports:
       - "${KINTUNNEL_ADMIN_BIND_HOST:-127.0.0.1}:${KINTUNNEL_ADMIN_PORT:-8080}:8080/tcp"
     secrets:
-      - kintunnel_session_secret
+      - kintunnel_admin_token
 
 volumes:
   kintunnel-data:
   kintunnel-backups:
 
 secrets:
-  kintunnel_session_secret:
-    file: ${KINTUNNEL_SESSION_SECRET_FILE:-./config/secrets/session-secret.txt}
+  kintunnel_admin_token:
+    file: ${KINTUNNEL_ADMIN_TOKEN_FILE:-./config/secrets/admin-token.txt}
 ```
 
 This keeps the admin UI on localhost by default. Use an SSH tunnel or a reverse proxy with authentication and IP allowlisting.
@@ -91,15 +122,16 @@ This keeps the admin UI on localhost by default. Use an SSH tunnel or a reverse 
 Create `.env`:
 
 ```env
+KINTUNNEL_DRY_RUN=true
 KINTUNNEL_PUBLIC_ENDPOINT=vpn.example.com
 KINTUNNEL_WG_PORT=51820
 KINTUNNEL_WG_INTERFACE=wg0
 KINTUNNEL_WG_ADDRESS=10.44.0.1/24
 KINTUNNEL_WG_DNS=1.1.1.1
 KINTUNNEL_ALLOWED_IPS=0.0.0.0/0
+KINTUNNEL_ADMIN_TOKEN_FILE=./config/secrets/admin-token.txt
 KINTUNNEL_ADMIN_BIND_HOST=127.0.0.1
 KINTUNNEL_ADMIN_PORT=8080
-KINTUNNEL_SESSION_SECRET_FILE=./config/secrets/session-secret.txt
 ```
 
 See [environment-variables.md](../configuration/environment-variables.md) for details.
@@ -107,7 +139,7 @@ See [environment-variables.md](../configuration/environment-variables.md) for de
 ## Start
 
 ```sh
-docker compose up -d
+docker compose --profile admin up -d
 docker compose ps
 ```
 

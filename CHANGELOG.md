@@ -12,10 +12,11 @@ This project follows the spirit of Keep a Changelog and intends to use semantic 
 - Apache-2.0 licensing scaffold.
 - Security, contribution, conduct, roadmap, and notice documents.
 - README positioning for an original Docker-native family VPN manager for WireGuard deployments.
+- Process-level integration coverage for the dry-run engine and admin HTTP client peer lifecycle.
 
 ### Changed
 
-- Nothing yet.
+- README and operator docs now describe the runnable dry-run MVP, Docker image names, build commands, and current non-dry-run limitations.
 
 ### Deprecated
 

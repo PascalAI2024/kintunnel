@@ -1,0 +1,34 @@
+{
+  "name": "kintunnel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Docker-native family VPN manager for WireGuard.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PascalAI2024/kintunnel.git"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev:engine": "npm --workspace @kintunnel/engine run dev",
+    "dev:admin": "npm --workspace @kintunnel/admin run dev",
+    "start:engine": "npm --workspace @kintunnel/engine run start",
+    "start:admin": "npm --workspace @kintunnel/admin run start",
+    "test": "npm run test --workspaces && npm run test:integration",
+    "test:engine": "npm --workspace @kintunnel/engine run test",
+    "test:admin": "npm --workspace @kintunnel/admin run test",
+    "test:integration": "vitest run tests/integration"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "tsx": "^4.22.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  }
+}

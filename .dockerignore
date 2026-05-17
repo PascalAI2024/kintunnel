@@ -1,0 +1,17 @@
+.git
+.github
+node_modules
+packages/*/node_modules
+packages/*/dist
+npm-debug.log*
+.env
+.env.*
+!.env.example
+config/secrets
+backups
+tmp
+coverage
+.nyc_output
+site
+.DS_Store
+Thumbs.db

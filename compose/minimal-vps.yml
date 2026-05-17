@@ -12,6 +12,15 @@
 services:
   engine:
     restart: unless-stopped
+    environment:
+      KINTUNNEL_DRY_RUN: ${KINTUNNEL_DRY_RUN:-true}
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv4.conf.all.src_valid_mark: "1"
 
   admin:
     restart: unless-stopped

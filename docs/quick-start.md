@@ -1,6 +1,6 @@
 # Quick Start
 
-This path gets a working MVP onto one Linux VPS using Docker Compose and WireGuard.
+This path gets the runnable MVP started safely. Dry-run mode is the default recommendation while the host networking reconcile path is still conservative.
 
 ## Requirements
 
@@ -16,33 +16,60 @@ This path gets a working MVP onto one Linux VPS using Docker Compose and WireGua
 The recommended MVP uses the original KinTunnel two-service shape:
 
 - WireGuard data plane on UDP `51820`.
-- Privileged engine container that applies WireGuard, forwarding, and NAT state using standard Linux tooling.
+- Engine container that owns peer state, renders client configs, and validates WireGuard host readiness.
 - Unprivileged admin container on an internal Docker port, published only through a reverse proxy or an SSH tunnel.
 - Persistent config volume for peers and server keys.
 - Full-tunnel peer configs using `AllowedIPs = 0.0.0.0/0, ::/0`.
 
+Current limitation: dry-run mode creates the server state, peer records, and client configs. Non-dry-run reconcile is not production-ready yet; it is conservative by design and should be treated as host-networking test work.
+
+## Local Runtime
+
+From the repository root:
+
+```sh
+npm ci
+npm test
+KINTUNNEL_DRY_RUN=true KINTUNNEL_ENGINE_PORT=9090 npm run dev:engine
+```
+
+In another shell:
+
+```sh
+KINTUNNEL_ADMIN_TOKEN=change-me KINTUNNEL_ENGINE_URL=http://127.0.0.1:9090 npm run dev:admin
+```
+
+Open `http://127.0.0.1:8080` and use the configured admin token.
+
 ## Steps
 
-1. Create the server directory.
+1. Clone the repository on the server.
 
-```powershell
-mkdir kintunnel
+```sh
+git clone https://github.com/PascalAI2024/kintunnel.git
 cd kintunnel
 ```
 
-2. Create a `.env` file using [environment-variables.md](configuration/environment-variables.md).
+2. Create a `.env` file and admin token.
 
-3. Create a Compose file using [installation/docker-compose.md](installation/docker-compose.md).
+```sh
+cp .env.example .env
+mkdir -p config/secrets
+openssl rand -base64 32 > config/secrets/admin-token.txt
+```
 
-4. Start the service.
+3. Edit `.env` using [environment-variables.md](configuration/environment-variables.md). At minimum, set `KINTUNNEL_PUBLIC_ENDPOINT`.
 
-```powershell
-docker compose up -d
+4. Build and start the service.
+
+```sh
+docker compose --profile admin build
+docker compose --profile admin up -d
 ```
 
 5. Confirm the container is running.
 
-```powershell
+```sh
 docker compose ps
 docker compose logs --tail 100
 ```
@@ -53,11 +80,13 @@ docker compose logs --tail 100
 
 8. Have the user install the official WireGuard client and import the QR code or config file.
 
-9. Verify the client public IP matches the VPS public IP.
+9. In dry-run mode, verify the generated config. In non-dry-run test environments, verify the client public IP matches the VPS public IP.
 
 ## First Verification
 
-From a connected client:
+In dry-run mode, verify the admin UI can create a peer and render a WireGuard config. That proves the control plane works without modifying the host.
+
+For non-dry-run testing only, from a connected client:
 
 ```sh
 curl https://ifconfig.me

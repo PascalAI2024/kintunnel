@@ -2,12 +2,18 @@
 #
 # KinTunnel uses KINTUNNEL_* environment variables and lowercase kintunnel
 # image, path, volume, and container names:
-#   ghcr.io/pascalai2024/kintunnel-engine:dev
-#   ghcr.io/pascalai2024/kintunnel-admin:dev
+#   ghcr.io/pascalai2024/kintunnel-engine:v0.1.0
+#   ghcr.io/pascalai2024/kintunnel-admin:v0.1.0
 #
 # Minimal VPS:
 #   cp .env.example .env
+#   mkdir -p config/secrets
+#   openssl rand -base64 32 > config/secrets/admin-token.txt
 #   docker compose --profile admin up -d
+#
+# Compose builds local images by default. Set KINTUNNEL_ENGINE_IMAGE and
+# KINTUNNEL_ADMIN_IMAGE to retag or pull published images when you deliberately
+# skip local builds. Docker Compose cannot make build: conditional; charming.
 #
 # Dokploy / Swarm:
 #   Prefer compose/dokploy-swarm.yml as a starting point.
@@ -18,16 +24,24 @@ name: ${COMPOSE_PROJECT_NAME:-kintunnel}
 
 services:
   engine:
-    image: ${KINTUNNEL_ENGINE_IMAGE:-ghcr.io/pascalai2024/kintunnel-engine:dev}
+    image: ${KINTUNNEL_ENGINE_IMAGE:-kintunnel-engine:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.engine
     container_name: ${KINTUNNEL_ENGINE_CONTAINER:-kintunnel-engine}
     restart: unless-stopped
     init: true
     environment:
       KINTUNNEL_ENV: ${KINTUNNEL_ENV:-production}
+      KINTUNNEL_DRY_RUN: ${KINTUNNEL_DRY_RUN:-true}
       KINTUNNEL_PUBLIC_ENDPOINT: ${KINTUNNEL_PUBLIC_ENDPOINT:?set KINTUNNEL_PUBLIC_ENDPOINT in .env}
+      KINTUNNEL_ENDPOINT_HOST: ${KINTUNNEL_PUBLIC_ENDPOINT:?set KINTUNNEL_PUBLIC_ENDPOINT in .env}
+      KINTUNNEL_ENDPOINT_PORT: ${KINTUNNEL_WG_PORT:-51820}
       KINTUNNEL_WG_INTERFACE: ${KINTUNNEL_WG_INTERFACE:-wg0}
+      KINTUNNEL_WG_LISTEN_PORT: ${KINTUNNEL_WG_PORT:-51820}
       KINTUNNEL_WG_PORT: ${KINTUNNEL_WG_PORT:-51820}
       KINTUNNEL_WG_ADDRESS: ${KINTUNNEL_WG_ADDRESS:-10.44.0.1/24}
+      KINTUNNEL_DNS_SERVERS: ${KINTUNNEL_WG_DNS:-1.1.1.1}
       KINTUNNEL_WG_DNS: ${KINTUNNEL_WG_DNS:-1.1.1.1}
       KINTUNNEL_ALLOWED_IPS: ${KINTUNNEL_ALLOWED_IPS:-0.0.0.0/0}
       KINTUNNEL_DATA_DIR: /var/lib/kintunnel
@@ -38,19 +52,12 @@ services:
       - kintunnel-data:/var/lib/kintunnel
       - kintunnel-backups:/backups
     ports:
-      - target: 51820
+      - target: ${KINTUNNEL_WG_PORT:-51820}
         published: ${KINTUNNEL_WG_PORT:-51820}
         protocol: udp
         mode: host
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    cap_add:
-      - NET_ADMIN
-    sysctls:
-      net.ipv4.ip_forward: "1"
-      net.ipv4.conf.all.src_valid_mark: "1"
     healthcheck:
-      test: ["CMD-SHELL", "kintunnel-engine healthcheck || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9090/health >/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -59,7 +66,10 @@ services:
       - control
 
   admin:
-    image: ${KINTUNNEL_ADMIN_IMAGE:-ghcr.io/pascalai2024/kintunnel-admin:dev}
+    image: ${KINTUNNEL_ADMIN_IMAGE:-kintunnel-admin:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.admin
     container_name: ${KINTUNNEL_ADMIN_CONTAINER:-kintunnel-admin}
     restart: unless-stopped
     init: true
@@ -70,7 +80,7 @@ services:
       KINTUNNEL_ADMIN_BIND: 0.0.0.0
       KINTUNNEL_ADMIN_PORT: 8080
       KINTUNNEL_ENGINE_URL: http://engine:9090
-      KINTUNNEL_SESSION_SECRET_FILE: /run/secrets/kintunnel_session_secret
+      KINTUNNEL_ADMIN_TOKEN_FILE: /run/secrets/kintunnel_admin_token
       TZ: ${TZ:-UTC}
     volumes:
       - ./config:/etc/kintunnel:ro
@@ -79,7 +89,7 @@ services:
       # front of this before exposing it. The internet contains opinions.
       - "${KINTUNNEL_ADMIN_BIND_HOST:-127.0.0.1}:${KINTUNNEL_ADMIN_PORT:-8080}:8080/tcp"
     secrets:
-      - kintunnel_session_secret
+      - kintunnel_admin_token
     depends_on:
       engine:
         condition: service_healthy
@@ -96,5 +106,5 @@ volumes:
   kintunnel-backups:
 
 secrets:
-  kintunnel_session_secret:
-    file: ${KINTUNNEL_SESSION_SECRET_FILE:-./config/secrets/session-secret.txt}
+  kintunnel_admin_token:
+    file: ${KINTUNNEL_ADMIN_TOKEN_FILE:-./config/secrets/admin-token.txt}

@@ -8,7 +8,7 @@ Check:
 
 - VPS firewall allows UDP `51820`.
 - Cloud provider firewall allows UDP `51820`.
-- `KINTUNNEL_PUBLIC_ENDPOINT` resolves to the VPS public IP.
+- `KINTUNNEL_ENDPOINT_HOST` resolves to the VPS public IP.
 - Container is running.
 - Client config endpoint matches the server DNS name and port.
 
@@ -45,7 +45,7 @@ Check:
 - SSH tunnel is open if using tunnel access.
 - Reverse proxy target points to the correct container or localhost port.
 - HTTPS certificate is valid.
-- Session secret file exists and is mounted into the admin service.
+- Admin token file exists and is mounted into the admin service.
 
 ## Slow Speeds
 
@@ -61,10 +61,10 @@ Try testing from a different network and region before changing the server.
 
 ## DNS Fails
 
-Check `KINTUNNEL_WG_DNS`. Use a known public resolver first:
+Check `KINTUNNEL_DNS_SERVERS`. Use a known public resolver first:
 
 ```env
-KINTUNNEL_WG_DNS=1.1.1.1
+KINTUNNEL_DNS_SERVERS=1.1.1.1
 ```
 
 If custom DNS filtering is added later, test it separately from WireGuard tunnel setup.

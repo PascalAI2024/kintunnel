@@ -15,12 +15,14 @@ This roadmap describes intent, not a release promise.
 ## Phase 1: Minimum Usable Manager
 
 - Docker Compose deployment for a single-node VPS.
-- Admin authentication.
-- Peer creation, listing, revocation, and export.
-- QR-code onboarding.
-- Persistent configuration volume.
+- Admin token authentication.
+- Peer creation, listing, revocation, deletion, and config export.
+- QR-code onboarding in the admin UI.
+- Persistent engine state volume.
 - Basic backup and restore workflow.
 - Health checks for `/dev/net/tun`, forwarding, and port exposure.
+
+Current MVP limitation: dry-run mode is the safe default. Non-dry-run reconcile is conservative and not production-ready until host networking apply, rollback, firewall, and NAT behavior are hardened.
 
 ## Phase 2: Operator Safety
 

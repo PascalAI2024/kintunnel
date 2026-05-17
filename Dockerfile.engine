@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:22-bookworm-slim AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY packages/engine/package.json packages/engine/package.json
+COPY packages/admin/package.json packages/admin/package.json
+RUN npm ci
+
+FROM deps AS build
+COPY tsconfig.base.json ./
+COPY packages/engine/tsconfig.json packages/engine/tsconfig.json
+COPY packages/engine/src packages/engine/src
+RUN npm run build --workspace @kintunnel/engine
+
+FROM node:22-bookworm-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production \
+    KINTUNNEL_ENV=production \
+    KINTUNNEL_ENGINE_PORT=9090 \
+    KINTUNNEL_DATA_DIR=/var/lib/kintunnel
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl iproute2 iptables wireguard-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+COPY packages/engine/package.json packages/engine/package.json
+COPY packages/admin/package.json packages/admin/package.json
+RUN npm ci --omit=dev --ignore-scripts \
+    && npm cache clean --force
+
+COPY --from=build /app/packages/engine/dist packages/engine/dist
+
+RUN mkdir -p /var/lib/kintunnel /etc/kintunnel /backups \
+    && chown -R node:node /app /var/lib/kintunnel /etc/kintunnel /backups
+
+USER node
+EXPOSE 9090 51820/udp
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
+    CMD curl -fsS http://127.0.0.1:${KINTUNNEL_ENGINE_PORT}/health >/dev/null || exit 1
+
+CMD ["npm", "run", "start", "--workspace", "@kintunnel/engine"]

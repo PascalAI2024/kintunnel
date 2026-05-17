@@ -25,27 +25,65 @@ KinTunnel is not trying to be:
 
 ## Project Status
 
-KinTunnel is currently in the public scaffold and architecture phase. The repository is ready to show, discuss, and build from, but the runtime engine/admin images are not published yet.
+KinTunnel now has a runnable MVP runtime:
 
-## Preview Deployment Shape
+- The engine service exposes health, status, peer lifecycle, config export, and reconcile endpoints.
+- The admin service provides authenticated server-rendered peer workflows backed by the engine API.
+- Dry-run mode is the default documented operating mode for the MVP. It validates state and renders WireGuard configs without touching host networking.
+- Non-dry-run reconcile is deliberately conservative. It can inspect a host WireGuard interface, but it does not yet perform production-grade interface creation, peer replacement, firewall, or NAT management. Sensible, if a little less theatrical.
 
-Once runtime packages land, the local development shape is intended to be:
+The runtime is ready for local development and dry-run container evaluation. Treat real host networking as experimental until the reconcile path is hardened.
+
+## Run Locally
+
+Install dependencies, run tests, and start the engine in dry-run mode:
 
 ```bash
 git clone https://github.com/PascalAI2024/kintunnel.git
 cd kintunnel
-cp .env.example .env
-docker compose up --build
+npm ci
+npm test
+KINTUNNEL_DRY_RUN=true KINTUNNEL_ENGINE_PORT=9090 npm run dev:engine
 ```
 
-The expected production shape will be:
+In another shell, start the admin UI:
 
 ```bash
-docker compose pull
-docker compose up -d
+KINTUNNEL_ADMIN_TOKEN=change-me KINTUNNEL_ENGINE_URL=http://127.0.0.1:9090 npm run dev:admin
 ```
 
-Minimum host expectations:
+Open `http://127.0.0.1:8080` and authenticate with the configured token.
+
+## Docker MVP Shape
+
+The repository includes Dockerfiles for both runtime services. The default
+Compose flow builds local images from this checkout. GHCR publishing is wired
+for release tags, so treat registry images as a release artifact, not a
+requirement for source installs.
+
+Local source build:
+
+```bash
+npm ci
+npm run build
+```
+
+Container run from source:
+
+```bash
+cp .env.example .env
+mkdir -p config/secrets
+openssl rand -base64 32 > config/secrets/admin-token.txt
+docker compose --profile admin build
+docker compose --profile admin up -d
+docker compose ps
+```
+
+For the MVP, set `KINTUNNEL_DRY_RUN=true` unless you are explicitly testing host networking behavior.
+
+## VPS Requirements
+
+Minimum host expectations for non-dry-run testing:
 
 - Linux VPS with Docker Engine.
 - UDP port for WireGuard, commonly `51820/udp`.
@@ -107,6 +145,8 @@ See [SECURITY.md](SECURITY.md) for reporting guidance and security expectations.
 - [Security Policy](SECURITY.md)
 - [Third-Party Notices](THIRD_PARTY_NOTICES.md)
 - [Research Memo](docs/vpn-research.md)
+
+The research memo is retained as a historical note. KinTunnel is not a `wg-easy` fork and does not use `wg-easy` code.
 
 ## Trademark Notice
 
