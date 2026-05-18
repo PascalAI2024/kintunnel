@@ -21,14 +21,15 @@ ENV NODE_ENV=production \
     KINTUNNEL_DATA_DIR=/var/lib/kintunnel
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl iproute2 iptables wireguard-tools \
+    && apt-get install -y --no-install-recommends libc-bin libc6 libsystemd0 libudev1 curl iproute2 iptables wireguard-tools \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
 COPY packages/engine/package.json packages/engine/package.json
 COPY packages/admin/package.json packages/admin/package.json
 RUN npm ci --omit=dev --ignore-scripts \
-    && npm cache clean --force
+    && npm cache clean --force \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 COPY --from=build /app/packages/engine/dist packages/engine/dist
 
@@ -40,4 +41,4 @@ EXPOSE 9090 51820/udp
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
     CMD curl -fsS http://127.0.0.1:${KINTUNNEL_ENGINE_PORT}/health >/dev/null || exit 1
 
-CMD ["npm", "run", "start", "--workspace", "@kintunnel/engine"]
+CMD ["node", "packages/engine/dist/index.js"]
