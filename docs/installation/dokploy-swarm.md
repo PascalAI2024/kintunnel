@@ -36,6 +36,7 @@ services:
     image: ${KINTUNNEL_ENGINE_IMAGE}
     environment:
       KINTUNNEL_DRY_RUN: ${KINTUNNEL_DRY_RUN:-true}
+      KINTUNNEL_ENGINE_API_TOKEN_FILE: /run/secrets/kintunnel_engine_api_token
       KINTUNNEL_ENDPOINT_HOST: ${KINTUNNEL_PUBLIC_ENDPOINT}
       KINTUNNEL_ENDPOINT_PORT: ${KINTUNNEL_WG_PORT:-51820}
       KINTUNNEL_WG_INTERFACE: ${KINTUNNEL_WG_INTERFACE:-wg0}
@@ -55,6 +56,8 @@ services:
         mode: host
     cap_add:
       - NET_ADMIN
+    secrets:
+      - kintunnel_engine_api_token
     sysctls:
       net.ipv4.ip_forward: "1"
       net.ipv4.conf.all.src_valid_mark: "1"
@@ -72,7 +75,11 @@ services:
       KINTUNNEL_ADMIN_BIND: 0.0.0.0
       KINTUNNEL_ADMIN_PORT: 8080
       KINTUNNEL_ENGINE_URL: http://engine:9090
+      KINTUNNEL_ENGINE_API_TOKEN_FILE: /run/secrets/kintunnel_engine_api_token
       KINTUNNEL_ADMIN_TOKEN_FILE: /run/secrets/kintunnel_admin_token
+    secrets:
+      - kintunnel_admin_token
+      - kintunnel_engine_api_token
     volumes:
       - kintunnel_config:/etc/kintunnel:ro
     deploy:
@@ -87,6 +94,12 @@ volumes:
   kintunnel_config:
   kintunnel_data:
   kintunnel_backups:
+
+secrets:
+  kintunnel_admin_token:
+    external: true
+  kintunnel_engine_api_token:
+    external: true
 ```
 
 ## Dokploy Notes

@@ -21,6 +21,7 @@ Build and run the included Compose stack with:
 cp .env.example .env
 mkdir -p config/secrets
 openssl rand -base64 32 > config/secrets/admin-token.txt
+openssl rand -base64 32 > config/secrets/engine-api-token.txt
 docker compose --profile admin build
 docker compose --profile admin up -d
 ```
@@ -65,6 +66,7 @@ services:
     restart: unless-stopped
     environment:
       KINTUNNEL_DRY_RUN: ${KINTUNNEL_DRY_RUN:-true}
+      KINTUNNEL_ENGINE_API_TOKEN_FILE: /run/secrets/kintunnel_engine_api_token
       KINTUNNEL_ENDPOINT_HOST: ${KINTUNNEL_PUBLIC_ENDPOINT}
       KINTUNNEL_ENDPOINT_PORT: ${KINTUNNEL_WG_PORT:-51820}
       KINTUNNEL_WG_INTERFACE: ${KINTUNNEL_WG_INTERFACE:-wg0}
@@ -81,6 +83,8 @@ services:
       - "${KINTUNNEL_WG_PORT:-51820}:${KINTUNNEL_WG_PORT:-51820}/udp"
     cap_add:
       - NET_ADMIN
+    secrets:
+      - kintunnel_engine_api_token
     sysctls:
       net.ipv4.ip_forward: "1"
       net.ipv4.conf.all.src_valid_mark: "1"
@@ -98,6 +102,7 @@ services:
       KINTUNNEL_ADMIN_BIND: 0.0.0.0
       KINTUNNEL_ADMIN_PORT: 8080
       KINTUNNEL_ENGINE_URL: http://engine:9090
+      KINTUNNEL_ENGINE_API_TOKEN_FILE: /run/secrets/kintunnel_engine_api_token
       KINTUNNEL_ADMIN_TOKEN_FILE: /run/secrets/kintunnel_admin_token
     volumes:
       - ./config:/etc/kintunnel:ro
@@ -105,6 +110,7 @@ services:
       - "${KINTUNNEL_ADMIN_BIND_HOST:-127.0.0.1}:${KINTUNNEL_ADMIN_PORT:-8080}:8080/tcp"
     secrets:
       - kintunnel_admin_token
+      - kintunnel_engine_api_token
 
 volumes:
   kintunnel-data:
@@ -113,6 +119,8 @@ volumes:
 secrets:
   kintunnel_admin_token:
     file: ${KINTUNNEL_ADMIN_TOKEN_FILE:-./config/secrets/admin-token.txt}
+  kintunnel_engine_api_token:
+    file: ${KINTUNNEL_ENGINE_API_TOKEN_FILE:-./config/secrets/engine-api-token.txt}
 ```
 
 This keeps the admin UI on localhost by default. Use an SSH tunnel or a reverse proxy with authentication and IP allowlisting.
@@ -130,6 +138,7 @@ KINTUNNEL_WG_ADDRESS=10.44.0.1/24
 KINTUNNEL_WG_DNS=1.1.1.1
 KINTUNNEL_ALLOWED_IPS=0.0.0.0/0
 KINTUNNEL_ADMIN_TOKEN_FILE=./config/secrets/admin-token.txt
+KINTUNNEL_ENGINE_API_TOKEN_FILE=./config/secrets/engine-api-token.txt
 KINTUNNEL_ADMIN_BIND_HOST=127.0.0.1
 KINTUNNEL_ADMIN_PORT=8080
 ```
@@ -162,7 +171,7 @@ Reverse proxy option:
 - Terminate HTTPS at Traefik, Caddy, Nginx, or Dokploy.
 - Forward to `127.0.0.1:8080` or an internal Docker network.
 - Add IP allowlisting where possible.
-- Do not leave the admin UI open to the internet with only a weak password. That would be sporting, in the worst sense.
+- Do not leave the admin UI open to the internet with only a weak or reused token. That would be sporting, in the worst sense.
 
 ## Upgrade
 

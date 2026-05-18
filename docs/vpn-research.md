@@ -21,7 +21,7 @@ Do not start with NetBird, Tailscale, Headscale, or Netmaker for this specific g
 1. Deploy **wg-easy** as a single VPN service.
 2. Publish the WireGuard UDP port directly, usually `51820/udp`.
 3. Put the `wg-easy` web UI behind HTTPS through Dokploy/Traefik.
-4. Protect the admin UI with a strong password and ideally IP allowlisting or private access.
+4. Protect the admin UI with a strong credential and ideally IP allowlisting or private access.
 5. Create one peer per person/device.
 6. Have users install the WireGuard app and scan a QR code.
 7. Configure clients as full tunnel so traffic exits through the VPS IP:

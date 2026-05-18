@@ -2,13 +2,14 @@
 #
 # KinTunnel uses KINTUNNEL_* environment variables and lowercase kintunnel
 # image, path, volume, and container names:
-#   ghcr.io/pascalai2024/kintunnel-engine:v0.1.0
-#   ghcr.io/pascalai2024/kintunnel-admin:v0.1.0
+#   ghcr.io/OWNER/kintunnel-engine:v0.1.0
+#   ghcr.io/OWNER/kintunnel-admin:v0.1.0
 #
 # Minimal VPS:
 #   cp .env.example .env
 #   mkdir -p config/secrets
 #   openssl rand -base64 32 > config/secrets/admin-token.txt
+#   openssl rand -base64 32 > config/secrets/engine-api-token.txt
 #   docker compose --profile admin up -d
 #
 # Compose builds local images by default. Set KINTUNNEL_ENGINE_IMAGE and
@@ -31,9 +32,18 @@ services:
     container_name: ${KINTUNNEL_ENGINE_CONTAINER:-kintunnel-engine}
     restart: unless-stopped
     init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+      - /run
     environment:
       KINTUNNEL_ENV: ${KINTUNNEL_ENV:-production}
       KINTUNNEL_DRY_RUN: ${KINTUNNEL_DRY_RUN:-true}
+      KINTUNNEL_ENGINE_API_TOKEN_FILE: /run/secrets/kintunnel_engine_api_token
       KINTUNNEL_PUBLIC_ENDPOINT: ${KINTUNNEL_PUBLIC_ENDPOINT:?set KINTUNNEL_PUBLIC_ENDPOINT in .env}
       KINTUNNEL_ENDPOINT_HOST: ${KINTUNNEL_PUBLIC_ENDPOINT:?set KINTUNNEL_PUBLIC_ENDPOINT in .env}
       KINTUNNEL_ENDPOINT_PORT: ${KINTUNNEL_WG_PORT:-51820}
@@ -64,6 +74,8 @@ services:
       start_period: 30s
     networks:
       - control
+    secrets:
+      - kintunnel_engine_api_token
 
   admin:
     image: ${KINTUNNEL_ADMIN_IMAGE:-kintunnel-admin:local}
@@ -73,6 +85,13 @@ services:
     container_name: ${KINTUNNEL_ADMIN_CONTAINER:-kintunnel-admin}
     restart: unless-stopped
     init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
     profiles:
       - admin
     environment:
@@ -80,6 +99,7 @@ services:
       KINTUNNEL_ADMIN_BIND: 0.0.0.0
       KINTUNNEL_ADMIN_PORT: 8080
       KINTUNNEL_ENGINE_URL: http://engine:9090
+      KINTUNNEL_ENGINE_API_TOKEN_FILE: /run/secrets/kintunnel_engine_api_token
       KINTUNNEL_ADMIN_TOKEN_FILE: /run/secrets/kintunnel_admin_token
       TZ: ${TZ:-UTC}
     volumes:
@@ -90,6 +110,7 @@ services:
       - "${KINTUNNEL_ADMIN_BIND_HOST:-127.0.0.1}:${KINTUNNEL_ADMIN_PORT:-8080}:8080/tcp"
     secrets:
       - kintunnel_admin_token
+      - kintunnel_engine_api_token
     depends_on:
       engine:
         condition: service_healthy
@@ -108,3 +129,5 @@ volumes:
 secrets:
   kintunnel_admin_token:
     file: ${KINTUNNEL_ADMIN_TOKEN_FILE:-./config/secrets/admin-token.txt}
+  kintunnel_engine_api_token:
+    file: ${KINTUNNEL_ENGINE_API_TOKEN_FILE:-./config/secrets/engine-api-token.txt}

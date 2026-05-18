@@ -15,10 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Validate Compose model
         run: docker compose --env-file .env.example config
@@ -65,7 +65,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Validate GitHub Actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz -o actionlint.tar.gz
+          tar -xzf actionlint.tar.gz actionlint
+          chmod +x actionlint
+          ./actionlint
 
       - name: Inventory Markdown and YAML
         shell: bash
@@ -102,9 +111,8 @@ jobs:
             echo "ok $file"
           done
 
-      - name: Markdown lint placeholder
+      - name: Markdown link inventory
         shell: bash
         run: |
           set -euo pipefail
-          echo "Markdown linting is intentionally a placeholder until the repo selects a formatter/linter."
-          echo "Recommended future options: markdownlint-cli2, lychee for links, or pre-commit."
+          find . -path './.git' -prune -o -type f -name '*.md' -print | sort

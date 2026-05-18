@@ -1,1 +1,8 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Private vulnerability report
+    url: https://github.com/PascalAI2024/kintunnel/security/advisories/new
+    about: Report vulnerabilities, exposed credentials, or sensitive findings privately.
+  - name: Documentation
+    url: https://github.com/PascalAI2024/kintunnel/tree/main/docs
+    about: Start here for installation, configuration, and operations docs.

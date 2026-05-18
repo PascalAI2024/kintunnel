@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="180" viewBox="0 0 720 180" role="img" aria-labelledby="title desc">
+  <title id="title">KinTunnel logo</title>
+  <desc id="desc">A clean wordmark for KinTunnel, a family-scale WireGuard VPN manager.</desc>
+  <rect width="720" height="180" rx="28" fill="#f8fafc"/>
+  <g transform="translate(42 34)">
+    <rect x="0" y="0" width="112" height="112" rx="26" fill="#0f766e"/>
+    <path d="M29 73c0-25 54-25 54 0" fill="none" stroke="#ecfeff" stroke-width="10" stroke-linecap="round"/>
+    <path d="M39 57c0-16 34-16 34 0" fill="none" stroke="#ccfbf1" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="56" cy="83" r="8" fill="#ffffff"/>
+    <path d="M56 83v17" stroke="#ffffff" stroke-width="7" stroke-linecap="round"/>
+  </g>
+  <text x="190" y="78" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="46" font-weight="800" fill="#111827">KinTunnel</text>
+  <text x="193" y="116" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="20" font-weight="500" fill="#475569">Self-hosted WireGuard access for people you trust.</text>
+</svg>

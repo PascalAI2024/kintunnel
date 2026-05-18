@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">KinTunnel project card</title>
+  <desc id="desc">Social preview card for the KinTunnel open-source project.</desc>
+  <rect width="1280" height="640" fill="#0b1220"/>
+  <rect x="64" y="64" width="1152" height="512" rx="36" fill="#f8fafc"/>
+  <g transform="translate(116 122)">
+    <rect x="0" y="0" width="150" height="150" rx="34" fill="#0f766e"/>
+    <path d="M39 98c0-34 72-34 72 0" fill="none" stroke="#ecfeff" stroke-width="14" stroke-linecap="round"/>
+    <path d="M52 76c0-22 46-22 46 0" fill="none" stroke="#ccfbf1" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="75" cy="112" r="10" fill="#ffffff"/>
+    <path d="M75 112v23" stroke="#ffffff" stroke-width="9" stroke-linecap="round"/>
+  </g>
+  <text x="310" y="187" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="72" font-weight="850" fill="#111827">KinTunnel</text>
+  <text x="314" y="250" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="30" font-weight="520" fill="#334155">Docker-native WireGuard VPN for friends, family, and small trusted teams.</text>
+  <g font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="700">
+    <rect x="314" y="326" width="182" height="54" rx="14" fill="#ccfbf1"/>
+    <text x="342" y="360" fill="#0f766e">WireGuard</text>
+    <rect x="520" y="326" width="150" height="54" rx="14" fill="#dbeafe"/>
+    <text x="548" y="360" fill="#1d4ed8">Docker</text>
+    <rect x="694" y="326" width="150" height="54" rx="14" fill="#fef3c7"/>
+    <text x="722" y="360" fill="#92400e">Dry-run</text>
+  </g>
+  <path d="M116 480h520" stroke="#0f766e" stroke-width="10" stroke-linecap="round"/>
+  <path d="M116 510h760" stroke="#cbd5e1" stroke-width="10" stroke-linecap="round"/>
+  <path d="M116 540h390" stroke="#cbd5e1" stroke-width="10" stroke-linecap="round"/>
+</svg>

@@ -23,6 +23,8 @@ Non-dry-run reconcile is intentionally conservative and not production-ready. It
 - [Docker Compose Installation](installation/docker-compose.md)
 - [Dokploy Swarm Installation](installation/dokploy-swarm.md)
 - [Architecture](architecture.md)
+- [Brand](brand.md)
+- [Release Checklist](release-checklist.md)
 - [Environment Variables](configuration/environment-variables.md)
 - [Full Tunnel](configuration/full-tunnel.md)
 - [Split Tunnel](configuration/split-tunnel.md)
@@ -45,8 +47,9 @@ Non-dry-run reconcile is intentionally conservative and not production-ready. It
 
 ## Diagrams
 
-Source Mermaid diagrams:
+Rendered architecture and source Mermaid diagrams:
 
+- [Rendered Architecture](architecture.md)
 - [Architecture](diagrams/architecture.mmd)
 - [Packet Flow](diagrams/packet-flow.mmd)
 - [Onboarding Flow](diagrams/onboarding-flow.mmd)

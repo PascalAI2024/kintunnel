@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="520" viewBox="0 0 1080 520" role="img" aria-labelledby="title desc">
+  <title id="title">KinTunnel architecture</title>
+  <desc id="desc">A single VPS receives WireGuard client traffic, stores peer state in the KinTunnel engine, and exposes a protected admin UI.</desc>
+  <rect width="1080" height="520" rx="24" fill="#f8fafc"/>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0l10 5-10 5z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <g font-family="Inter, Segoe UI, Arial, sans-serif">
+    <text x="48" y="64" font-size="34" font-weight="800" fill="#111827">KinTunnel MVP architecture</text>
+    <text x="50" y="96" font-size="18" fill="#475569">Dry-run first, single-node WireGuard management for trusted groups.</text>
+    <rect x="54" y="172" width="210" height="104" rx="16" fill="#dbeafe" stroke="#93c5fd"/>
+    <text x="90" y="216" font-size="21" font-weight="750" fill="#1e3a8a">User devices</text>
+    <text x="90" y="246" font-size="15" fill="#1e40af">Official WireGuard clients</text>
+    <rect x="410" y="132" width="270" height="240" rx="20" fill="#ffffff" stroke="#cbd5e1"/>
+    <text x="450" y="174" font-size="22" font-weight="800" fill="#111827">Single Linux VPS</text>
+    <rect x="444" y="204" width="202" height="58" rx="12" fill="#ccfbf1"/>
+    <text x="486" y="240" font-size="18" font-weight="750" fill="#0f766e">KinTunnel engine</text>
+    <rect x="444" y="286" width="202" height="58" rx="12" fill="#fef3c7"/>
+    <text x="482" y="322" font-size="18" font-weight="750" fill="#92400e">Peer state volume</text>
+    <rect x="820" y="172" width="210" height="104" rx="16" fill="#ede9fe" stroke="#c4b5fd"/>
+    <text x="868" y="216" font-size="21" font-weight="750" fill="#4c1d95">Admin UI</text>
+    <text x="858" y="246" font-size="15" fill="#5b21b6">Token-authenticated control</text>
+    <path d="M264 224h146" stroke="#64748b" stroke-width="4" marker-end="url(#arrow)"/>
+    <text x="306" y="202" font-size="14" fill="#475569">UDP 51820</text>
+    <path d="M680 224h140" stroke="#64748b" stroke-width="4" marker-end="url(#arrow)"/>
+    <text x="716" y="202" font-size="14" fill="#475569">API token</text>
+    <path d="M545 262v24" stroke="#64748b" stroke-width="4" marker-end="url(#arrow)"/>
+    <path d="M545 372v58" stroke="#64748b" stroke-width="4" marker-end="url(#arrow)"/>
+    <text x="472" y="462" font-size="18" font-weight="750" fill="#111827">Internet via VPS public IP</text>
+  </g>
+</svg>

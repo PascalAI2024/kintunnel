@@ -4,6 +4,16 @@
   "private": true,
   "description": "Docker-native family VPN manager for WireGuard.",
   "license": "Apache-2.0",
+  "keywords": [
+    "docker",
+    "self-hosted",
+    "vpn",
+    "wireguard"
+  ],
+  "homepage": "https://github.com/PascalAI2024/kintunnel#readme",
+  "bugs": {
+    "url": "https://github.com/PascalAI2024/kintunnel/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/PascalAI2024/kintunnel.git"

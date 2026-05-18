@@ -9,6 +9,8 @@ const config: AdminConfig = {
   bind: "127.0.0.1",
   port: 0,
   engineUrl: "http://127.0.0.1:0",
+  engineApiToken: "engine-token",
+  engineTimeoutMs: 5000,
   adminToken: "test-token",
   env: "test"
 };
@@ -39,6 +41,10 @@ describe("admin app", () => {
     engine.get("/api/v1/peers", (_req, res) => {
       calls.push({ method: "GET", path: "/api/v1/peers" });
       res.json({ peers: [{ id: "peer-1", name: "alice-phone", status: "active", address_v4: "10.44.0.2/32" }] });
+    });
+    engine.get("/api/v1/events", (_req, res) => {
+      calls.push({ method: "GET", path: "/api/v1/events" });
+      res.json({ events: [{ id: "event-1", action: "peer.created", target_name: "alice-phone", revision: 2, created_at: "2026-05-17T00:00:00.000Z" }] });
     });
     engine.post("/api/v1/peers", (req, res) => {
       calls.push({ method: "POST", path: "/api/v1/peers", body: req.body });
@@ -103,6 +109,7 @@ describe("admin app", () => {
     expect(response.status).toBe(200);
     expect(response.text).toContain("alice-phone");
     expect(response.text).toContain("wg0");
+    expect(response.text).toContain("peer created");
   });
 
   it("creates peers through the engine", async () => {
@@ -122,14 +129,74 @@ describe("admin app", () => {
     });
   });
 
-  it("renders peer config and QR without logging the config body", async () => {
+  it("does not render or fetch peer config and QR on peer detail", async () => {
     const app = createApp({ config: { ...config, engineUrl } });
     const response = await request(app).get("/peers/peer-1").set("Authorization", "Bearer test-token");
 
     expect(response.status).toBe(200);
+    expect(response.text).not.toContain("PrivateKey = SECRET");
+    expect(response.text).not.toContain("data:image/png;base64");
+    expect(response.text).toContain("Download config");
+    expect(response.text).toContain("Open QR");
+    expect(calls).toContainEqual({ method: "GET", path: "/api/v1/peers/peer-1" });
+    expect(calls).not.toContainEqual({ method: "GET", path: "/api/v1/peers/peer-1/config" });
+  });
+
+  it("downloads peer config as an attachment", async () => {
+    const app = createApp({ config: { ...config, engineUrl } });
+    const response = await request(app).get("/peers/peer-1/config.conf").set("Authorization", "Bearer test-token");
+
+    expect(response.status).toBe(200);
+    expect(response.header["content-disposition"]).toContain("alice-phone.conf");
     expect(response.text).toContain("PrivateKey = SECRET");
-    expect(response.text).toContain("data:image/png;base64");
-    expect(calls.map((call) => call.body)).not.toContain("[Interface]\nPrivateKey = SECRET\nAddress = 10.44.0.2/32\n");
+  });
+
+  it("renders peer QR only on explicit request", async () => {
+    const app = createApp({ config: { ...config, engineUrl } });
+    const response = await request(app).get("/peers/peer-1/config.png").set("Authorization", "Bearer test-token");
+
+    expect(response.status).toBe(200);
+    expect(response.header["content-type"]).toContain("image/png");
+    expect(response.header["content-disposition"]).toContain("alice-phone-qr.png");
+    expect(response.body).toBeInstanceOf(Buffer);
+    expect(response.body.length).toBeGreaterThan(0);
+    expect(calls).toContainEqual({ method: "GET", path: "/api/v1/peers/peer-1/config" });
+  });
+
+  it("requires CSRF for cookie-authenticated peer creation", async () => {
+    const app = createApp({ config: { ...config, engineUrl } });
+    const agent = request.agent(app);
+
+    await agent.post("/login").type("form").send({ token: "test-token" }).expect(302);
+    await agent.post("/peers").type("form").send({ name: "csrf-missing" }).expect(403);
+    expect(calls).not.toContainEqual({
+      method: "POST",
+      path: "/api/v1/peers",
+      body: { name: "csrf-missing" }
+    });
+
+    const form = await agent.get("/peers/new").expect(200);
+    const csrfToken = extractCsrfToken(form.text);
+    await agent.post("/peers").type("form").send({ _csrf: csrfToken, name: "cookie-peer" }).expect(302);
+
+    expect(calls).toContainEqual({
+      method: "POST",
+      path: "/api/v1/peers",
+      body: { name: "cookie-peer" }
+    });
+  });
+
+  it("requires CSRF for cookie-authenticated logout", async () => {
+    const app = createApp({ config: { ...config, engineUrl } });
+    const agent = request.agent(app);
+
+    await agent.post("/login").type("form").send({ token: "test-token" }).expect(302);
+    await agent.post("/logout").type("form").send({}).expect(403);
+
+    const dashboard = await agent.get("/").expect(200);
+    const csrfToken = extractCsrfToken(dashboard.text);
+    const logout = await agent.post("/logout").type("form").send({ _csrf: csrfToken }).expect(302);
+    expect(logout.header.location).toBe("/login");
   });
 
   it("revokes and deletes peers through the engine", async () => {
@@ -150,3 +217,9 @@ describe("admin app", () => {
     expect(calls).not.toContainEqual({ method: "GET", path: "/v1/peers/missing" });
   });
 });
+
+function extractCsrfToken(html: string): string {
+  const match = html.match(/name="_csrf" value="([^"]+)"/);
+  expect(match).not.toBeNull();
+  return match?.[1] ?? "";
+}

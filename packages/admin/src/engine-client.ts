@@ -1,4 +1,4 @@
-import type { EngineStatus, Peer, PeerCreateInput } from "./types";
+import type { AuditEvent, EngineStatus, Peer, PeerCreateInput } from "./types";
 
 export class EngineError extends Error {
   constructor(
@@ -13,6 +13,7 @@ export class EngineError extends Error {
 export interface EngineClient {
   health(): Promise<EngineStatus>;
   status(): Promise<EngineStatus>;
+  listEvents(limit?: number): Promise<AuditEvent[]>;
   listPeers(): Promise<Peer[]>;
   createPeer(input: PeerCreateInput): Promise<Peer>;
   getPeer(id: string): Promise<Peer>;
@@ -23,9 +24,18 @@ export interface EngineClient {
 
 export class HttpEngineClient implements EngineClient {
   private readonly baseUrl: URL;
+  private apiToken?: string;
+  private timeoutMs = 5000;
+  private maxBodyBytes = 512 * 1024;
 
   constructor(engineUrl: string) {
     this.baseUrl = new URL(engineUrl);
+  }
+
+  configure(options: { apiToken?: string; timeoutMs?: number; maxBodyBytes?: number }): void {
+    this.apiToken = options.apiToken ?? this.apiToken;
+    this.timeoutMs = options.timeoutMs ?? this.timeoutMs;
+    this.maxBodyBytes = options.maxBodyBytes ?? this.maxBodyBytes;
   }
 
   async health(): Promise<EngineStatus> {
@@ -39,6 +49,16 @@ export class HttpEngineClient implements EngineClient {
   async listPeers(): Promise<Peer[]> {
     const body = await this.requestJson<{ peers?: Peer[] } | Peer[]>(["/api/v1/peers", "/v1/peers", "/peers"]);
     return Array.isArray(body) ? body : body.peers ?? [];
+  }
+
+  async listEvents(limit = 10): Promise<AuditEvent[]> {
+    const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
+    const body = await this.requestJson<{ events?: AuditEvent[] } | AuditEvent[]>([
+      `/api/v1/events?limit=${safeLimit}`,
+      `/v1/events?limit=${safeLimit}`,
+      `/events?limit=${safeLimit}`
+    ]);
+    return Array.isArray(body) ? body : body.events ?? [];
   }
 
   async createPeer(input: PeerCreateInput): Promise<Peer> {
@@ -84,17 +104,24 @@ export class HttpEngineClient implements EngineClient {
     let lastError: EngineError | undefined;
 
     for (const path of paths) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
       try {
         const response = await fetch(new URL(path, this.baseUrl), {
           ...init,
+          signal: controller.signal,
           headers: {
             accept: "application/json, text/plain;q=0.9",
+            ...(this.apiToken ? { authorization: `Bearer ${this.apiToken}` } : {}),
             ...(init.body ? { "content-type": "application/json" } : {}),
             ...init.headers
           }
         });
 
         const body = await response.text();
+        if (body.length > this.maxBodyBytes) {
+          throw new EngineError("Engine response exceeded size limit.", response.status);
+        }
         if (response.ok) {
           return body;
         }
@@ -104,8 +131,13 @@ export class HttpEngineClient implements EngineClient {
           break;
         }
       } catch (error) {
-        lastError = new EngineError(error instanceof Error ? error.message : "Engine request failed.");
+        const message = error instanceof Error && error.name === "AbortError"
+          ? "Engine request timed out."
+          : error instanceof Error ? error.message : "Engine request failed.";
+        lastError = new EngineError(message);
         break;
+      } finally {
+        clearTimeout(timeout);
       }
     }
 

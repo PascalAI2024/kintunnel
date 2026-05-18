@@ -22,7 +22,18 @@ KinTunnel is the public project name. The `KINTUNNEL_*` namespace is used for de
 4. Update README, roadmap, or security docs when user-facing behavior changes.
 5. Run the project checks before asking for review.
 
-The exact build and test commands will be documented once the runtime stack lands.
+Local checks:
+
+```sh
+npm ci
+npm run build
+npm test
+npm audit --audit-level=moderate
+python -m mkdocs build --strict
+docker compose --env-file .env.example --profile admin config
+```
+
+Docker image builds are covered in CI. Run them locally as well if Docker is available.
 
 ## Commit Style
 

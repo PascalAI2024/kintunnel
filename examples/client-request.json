@@ -1,8 +1,9 @@
 {
   "name": "alice-phone",
   "owner": "Alice",
-  "allowedIps": "10.44.0.10/32",
-  "dns": "1.1.1.1",
-  "persistentKeepalive": 25,
+  "generate_keys": true,
+  "allowed_ips": ["0.0.0.0/0"],
+  "dns_servers": ["1.1.1.1"],
+  "persistent_keepalive": 25,
   "notes": "Example request only. Do not put private keys in tickets."
 }

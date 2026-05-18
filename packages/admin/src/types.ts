@@ -1,6 +1,8 @@
 export interface EngineStatus {
   ok?: boolean;
   ready?: boolean;
+  dry_run?: boolean;
+  revision?: number;
   engine?: string;
   version?: string;
   interface?: {
@@ -42,6 +44,17 @@ export interface Peer {
   transfer_rx_bytes?: number;
   transfer_tx_bytes?: number;
   [key: string]: unknown;
+}
+
+export interface AuditEvent {
+  id: string;
+  action: string;
+  actor?: string;
+  target_id?: string;
+  target_name?: string;
+  revision?: number;
+  created_at?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface PeerCreateInput {

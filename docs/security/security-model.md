@@ -26,7 +26,7 @@ The standalone source is [../diagrams/security-boundaries.mmd](../diagrams/secur
 
 - WireGuard server private key.
 - Peer private keys and QR codes.
-- Admin UI password hash.
+- Admin token and engine API token.
 - VPS root or sudo access.
 - Backup archives.
 - DNS records pointing users to the service.
@@ -35,7 +35,8 @@ The standalone source is [../diagrams/security-boundaries.mmd](../diagrams/secur
 
 | Risk | Control |
 |---|---|
-| Admin UI compromise | Strong password, HTTPS, IP allowlist, or SSH tunnel. |
+| Admin UI compromise | Strong token, no-store headers, HTTPS, IP allowlist, or SSH tunnel. |
+| Engine API exposure | Bearer token on all versioned engine routes and no host port publish for the API. |
 | Lost user device | Remove the peer immediately. |
 | Leaked peer config | Revoke and recreate the peer. |
 | VPS compromise | Rebuild server, rotate all peers, restore only trusted backups. |
@@ -55,10 +56,26 @@ The standalone source is [../diagrams/security-boundaries.mmd](../diagrams/secur
 The admin UI is more sensitive than the VPN UDP port. Protect it accordingly:
 
 - Prefer SSH tunnel or VPN-only access.
-- If public HTTPS is needed, use a strong password and IP allowlisting.
+- If public HTTPS is needed, use a strong token and IP allowlisting.
 - Avoid sharing screenshots containing QR codes or peer configs.
 
+## Engine API Policy
+
+The engine API is an internal control-plane API. It requires `KINTUNNEL_ENGINE_API_TOKEN` or `KINTUNNEL_ENGINE_API_TOKEN_FILE` for `/v1` and `/api/v1` routes.
+
+The root `/health` endpoint stays unauthenticated so container health checks can work without exposing peer or config data.
+
+## Expiry Policy
+
+Expired peers are treated as inactive:
+
+- They do not receive config exports.
+- They are excluded from dry-run runtime state.
+- They are excluded from reconcile active peer counts.
+
 ## Incident Response
+
+Report vulnerabilities, exposed credentials, authentication bypasses, and deployment-sensitive findings through [GitHub private vulnerability reporting](https://github.com/PascalAI2024/kintunnel/security/advisories/new). Do not open public issues for active vulnerabilities.
 
 For a lost device:
 
@@ -74,4 +91,3 @@ For suspected server compromise:
 4. Generate new server keys.
 5. Recreate peers.
 6. Restore only known-good configuration data.
-

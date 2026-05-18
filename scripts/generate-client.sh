@@ -9,8 +9,8 @@ usage() {
 Usage:
   scripts/generate-client.sh <client-name> [owner]
 
-Creates a client request JSON file for the future KinTunnel engine/admin API.
-It does not generate keys yet because the runtime contract does not exist.
+Creates a peer creation request JSON file for the KinTunnel engine API.
+The engine can generate WireGuard keys server-side when generate_keys is true.
 USAGE
 }
 
@@ -47,13 +47,14 @@ cat > "$request_file" <<JSON
 {
   "name": "$name",
   "owner": "${owner:-$name}",
-  "createdAt": "$created_at",
-  "allowedIps": null,
-  "dns": null,
-  "persistentKeepalive": 25,
-  "notes": "Request placeholder. Generate real keys only through the KinTunnel runtime once implemented."
+  "created_at": "$created_at",
+  "generate_keys": true,
+  "allowed_ips": ["0.0.0.0/0"],
+  "dns_servers": ["1.1.1.1"],
+  "persistent_keepalive": 25,
+  "notes": "Submit name, generate_keys, allowed_ips, dns_servers, and persistent_keepalive to POST /v1/peers. Do not put private keys in tickets."
 }
 JSON
 
 printf 'Client request written: %s\n' "$request_file"
-printf 'No WireGuard keys were generated. That waits for the runtime API, sensibly.\n'
+printf 'Submit this through the admin UI or engine API when ready.\n'

@@ -1,10 +1,15 @@
+import crypto from "node:crypto";
 import express, { type ErrorRequestHandler, type Request, type Response } from "express";
 import { renderClientConfig } from "./config-render.js";
+import { assertStrongEngineApiToken } from "./env.js";
+import { isPeerActive, peerApiStatus } from "./peers.js";
 import { getCapabilities, getRuntimeState, reconcile } from "./runtime.js";
 import { StateStore, ValidationError } from "./state.js";
-import type { EngineConfig, PeerRecord, ServerSettings } from "./types.js";
+import type { AuditEvent, EngineConfig, PeerRecord, ServerSettings } from "./types.js";
 
 export function createApp(config: EngineConfig) {
+  assertStrongEngineApiToken(config.apiToken, config.env);
+
   const app = express();
   const api = express.Router();
   const store = new StateStore(config);
@@ -19,13 +24,14 @@ export function createApp(config: EngineConfig) {
         ok: config.dryRun || capabilities.hasWg,
         service: "kintunnel-engine",
         dry_run: config.dryRun,
-        data_dir: config.dataDir,
         messages: capabilities.messages
       });
     } catch (error) {
       next(error);
     }
   });
+
+  api.use(requireApiToken(config.apiToken));
 
   api.get("/health", (_req, res) => {
     res.json({
@@ -53,7 +59,8 @@ export function createApp(config: EngineConfig) {
         server: sanitizeServer(state.server),
         peers: {
           total: state.peers.length,
-          active: state.peers.filter((peer) => peer.status === "active").length,
+          active: state.peers.filter((peer) => isPeerActive(peer)).length,
+          expired: state.peers.filter((peer) => peerApiStatus(peer) === "expired").length,
           revoked: state.peers.filter((peer) => peer.status === "revoked").length,
           deleted: state.peers.filter((peer) => peer.status === "deleted").length
         },
@@ -72,6 +79,18 @@ export function createApp(config: EngineConfig) {
       const status = typeof req.query.status === "string" ? req.query.status : undefined;
       const peers = status ? state.peers.filter((peer) => peer.status === status) : state.peers;
       res.json({ peers: peers.map(sanitizePeer) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.get("/events", async (req, res, next) => {
+    try {
+      const state = await store.load();
+      const limitRaw = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : 50;
+      const limit = Number.isInteger(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 50;
+      const events = [...(state.events ?? [])].reverse().slice(0, limit).map(sanitizeEvent);
+      res.json({ events });
     } catch (error) {
       next(error);
     }
@@ -102,13 +121,27 @@ export function createApp(config: EngineConfig) {
 
   api.get("/peers/:id/config", async (req, res, next) => {
     try {
-      const state = await store.load();
-      const peer = state.peers.find((candidate) => candidate.id === req.params.id);
-      if (!peer || peer.status !== "active") {
-        throw new ValidationError("Peer not found.", { id: ["not found or not active"] });
-      }
+      const clientConfig = await store.update((state) => {
+        const peer = state.peers.find((candidate) => candidate.id === req.params.id);
+        if (!peer || !isPeerActive(peer)) {
+          throw new ValidationError("Peer not found.", { id: ["not found or not active"] });
+        }
 
-      res.type("text/plain").send(renderClientConfig(peer, state.server));
+        store.appendEvent(state, {
+          action: "peer.config.exported",
+          targetId: peer.id,
+          targetName: peer.name,
+          metadata: {
+            format: "wireguard",
+            status: peerApiStatus(peer)
+          }
+        });
+
+        return renderClientConfig(peer, state.server);
+      });
+
+      setSensitiveHeaders(res);
+      res.type("text/plain").send(clientConfig);
     } catch (error) {
       next(error);
     }
@@ -137,6 +170,16 @@ export function createApp(config: EngineConfig) {
       const result = await store.update(async (state) => {
         const reconcileResult = await reconcile(config, state);
         state.lastReconcile = reconcileResult;
+        state.revision += 1;
+        store.appendEvent(state, {
+          action: "reconcile.completed",
+          metadata: {
+            ok: reconcileResult.ok,
+            dry_run: reconcileResult.dryRun,
+            applied: reconcileResult.applied,
+            active_peer_count: reconcileResult.activePeerCount
+          }
+        });
         return reconcileResult;
       });
       res.status(result.ok ? 200 : 409).json({ reconcile: result });
@@ -180,13 +223,56 @@ function sanitizePeer(peer: PeerRecord) {
     allowed_ips: peer.allowedIps,
     dns_servers: peer.dnsServers,
     persistent_keepalive: peer.persistentKeepalive,
-    status: peer.status,
+    status: peerApiStatus(peer),
     expires_at: peer.expiresAt,
     created_at: peer.createdAt,
     updated_at: peer.updatedAt,
     revoked_at: peer.revokedAt,
     deleted_at: peer.deletedAt
   };
+}
+
+function sanitizeEvent(event: AuditEvent) {
+  return {
+    id: event.id,
+    action: event.action,
+    actor: event.actor,
+    target_id: event.targetId,
+    target_name: event.targetName,
+    revision: event.revision,
+    created_at: event.createdAt,
+    metadata: event.metadata
+  };
+}
+
+function requireApiToken(apiToken: string) {
+  return (req: Request, res: Response, next: () => void) => {
+    const header = req.header("authorization");
+    const bearer = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
+    if (safeEqual(bearer, apiToken)) {
+      next();
+      return;
+    }
+    res.status(401).json({
+      error: {
+        code: "unauthorized",
+        message: "Engine API token is required."
+      }
+    });
+  };
+}
+
+function safeEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function setSensitiveHeaders(res: Response) {
+  res.setHeader("Cache-Control", "no-store, private");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("X-Robots-Tag", "noindex");
 }
 
 function sanitizeServer(server: ServerSettings) {

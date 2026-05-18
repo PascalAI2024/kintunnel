@@ -1,6 +1,6 @@
 # Roadmap
 
-KinTunnel is the public project name. The repository slug is expected to become `kintunnel`.
+KinTunnel is the public project name. The repository slug is `kintunnel`.
 
 This roadmap describes intent, not a release promise.
 
@@ -14,12 +14,22 @@ This roadmap describes intent, not a release promise.
 
 ## Phase 1: Minimum Usable Manager
 
-- Docker Compose deployment for a single-node VPS.
-- Admin token authentication.
-- Peer creation, listing, revocation, deletion, and config export.
+Shipped in the dry-run MVP:
+
+- Docker Compose deployment shape for a single-node VPS.
+- Admin token authentication and engine API token authentication.
+- Peer creation, listing, revocation, deletion, config export, and config download.
 - QR-code onboarding in the admin UI.
 - Persistent engine state volume.
-- Basic backup and restore workflow.
+- Basic audit event trail for peer lifecycle and reconcile actions.
+- CI coverage for workspace build, tests, Compose validation, and Docker image builds.
+
+Remaining before production host networking:
+
+- Actual WireGuard interface apply and peer replacement.
+- NAT/firewall policy apply and rollback.
+- Live Linux VPS validation with `KINTUNNEL_DRY_RUN=false`.
+- Backup and restore runtime verification.
 - Health checks for `/dev/net/tun`, forwarding, and port exposure.
 
 Current MVP limitation: dry-run mode is the safe default. Non-dry-run reconcile is conservative and not production-ready until host networking apply, rollback, firewall, and NAT behavior are hardened.

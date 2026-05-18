@@ -46,6 +46,21 @@ Check:
 - Reverse proxy target points to the correct container or localhost port.
 - HTTPS certificate is valid.
 - Admin token file exists and is mounted into the admin service.
+- Engine API token file exists and is mounted into both services.
+
+## Engine API Returns 401
+
+Check:
+
+- `KINTUNNEL_ENGINE_API_TOKEN_FILE` points to the same secret for engine and admin.
+- The secret exists before starting Compose.
+- The admin service has been restarted after token rotation.
+
+For Compose installs:
+
+```sh
+docker compose --profile admin config | grep KINTUNNEL_ENGINE_API_TOKEN_FILE
+```
 
 ## Slow Speeds
 

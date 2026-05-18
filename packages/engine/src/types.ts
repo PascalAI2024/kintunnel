@@ -1,4 +1,11 @@
 export type PeerStatus = "active" | "disabled" | "revoked" | "deleted";
+export type AuditAction =
+  | "state.initialized"
+  | "peer.created"
+  | "peer.config.exported"
+  | "peer.revoked"
+  | "peer.deleted"
+  | "reconcile.completed";
 
 export interface ServerSettings {
   interfaceName: string;
@@ -35,19 +42,35 @@ export interface PeerRecord {
   deletedAt?: string;
 }
 
+export type ApiPeerStatus = PeerStatus | "expired";
+
 export interface EngineState {
   version: 1;
   revision: number;
   server: ServerSettings;
   peers: PeerRecord[];
+  events?: AuditEvent[];
   lastReconcile?: ReconcileResult;
 }
 
+export interface AuditEvent {
+  id: string;
+  action: AuditAction;
+  actor: string;
+  targetId?: string;
+  targetName?: string;
+  revision: number;
+  createdAt: string;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
 export interface EngineConfig {
+  env: string;
   port: number;
   dataDir: string;
   statePath: string;
   dryRun: boolean;
+  apiToken: string;
   interfaceName: string;
   listenPort: number;
   endpointHost: string;

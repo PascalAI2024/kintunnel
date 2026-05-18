@@ -21,8 +21,10 @@ describe("engine process with admin HTTP client", () => {
       cwd: path.resolve("."),
       env: {
         ...process.env,
+        KINTUNNEL_ENV: "test",
         KINTUNNEL_DRY_RUN: "true",
         KINTUNNEL_ENGINE_PORT: String(port),
+        KINTUNNEL_ENGINE_API_TOKEN: "engine-token",
         KINTUNNEL_DATA_DIR: tempDir,
         KINTUNNEL_ENDPOINT_HOST: "vpn.integration.test",
         KINTUNNEL_ENDPOINT_PORT: "51820",
@@ -49,6 +51,7 @@ describe("engine process with admin HTTP client", () => {
 
   it("creates, reads, renders, revokes, and deletes a peer through HttpEngineClient", async () => {
     const client = new HttpEngineClient(`http://127.0.0.1:${port}`);
+    client.configure({ apiToken: "engine-token" });
 
     const health = await client.health();
     expect(health.ok).toBe(true);

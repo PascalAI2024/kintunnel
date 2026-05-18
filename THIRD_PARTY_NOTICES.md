@@ -1,19 +1,32 @@
 # Third-Party Notices
 
-This repository is intended to be licensed under the Apache License, Version 2.0.
+KinTunnel is licensed under the Apache License, Version 2.0.
 
-At scaffold time, no third-party source code has been vendored into the repository.
+This repository does not vendor third-party source code. It does depend on open-source packages and runtime images during development, testing, and container builds.
+
+## Runtime Dependencies
+
+- Express for HTTP services.
+- cookie-parser for admin session cookie parsing.
+- qrcode for rendering WireGuard client configuration QR codes.
+- Node.js official container images for the engine and admin runtime images.
+- Debian packages installed in runtime images, including `curl`, `iproute2`, `iptables`, and `wireguard-tools` for the engine image.
+
+## Development and Test Dependencies
+
+- TypeScript and tsx for TypeScript compilation and local execution.
+- Vitest for tests.
+- Supertest for admin HTTP tests.
+- MkDocs for documentation builds.
 
 ## Referenced Technologies
 
-The project is expected to integrate with or document deployment around the following technologies:
+- WireGuard.
+- Docker and Docker Compose.
+- Dokploy, Docker Swarm, Traefik, Caddy, and Nginx in deployment examples.
+- Linux networking facilities such as `/dev/net/tun`, IP forwarding, and firewall/NAT rules.
 
-- WireGuard
-- Docker
-- Docker Compose
-- Linux networking facilities such as `/dev/net/tun`, IP forwarding, and firewall/NAT rules
-
-These technologies are not automatically redistributed by this repository unless future package, image, or source additions explicitly include them. Future contributors should update this file whenever third-party code, assets, container base images, generated clients, or bundled binaries are added.
+Package-level licenses are tracked through the relevant package manifests and lockfiles. Contributors should update this file whenever new third-party source, assets, container base images, generated clients, or bundled binaries are added.
 
 ## Trademark Notice
 

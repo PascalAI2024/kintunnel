@@ -4,6 +4,8 @@ KinTunnel is a single-server WireGuard VPN service. The first production shape i
 
 ## MVP Architecture
 
+![KinTunnel architecture](assets/architecture.svg)
+
 ```mermaid
 flowchart LR
   user["User device<br/>WireGuard client"]

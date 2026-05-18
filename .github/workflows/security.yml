@@ -14,28 +14,81 @@ permissions:
   security-events: write
 
 jobs:
-  placeholders:
-    name: Security placeholders
+  scan:
+    name: Dependency, secret, Dockerfile, and filesystem scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Secret scan placeholder
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Secret scanning is reserved for the repository host settings and a future committed scanner policy."
-          echo "Suggested future tools: GitHub secret scanning, gitleaks, trufflehog."
-          echo "This placeholder avoids blocking early repository work before baseline findings are reviewed."
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
 
-      - name: Container scan placeholder
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f Dockerfile ]; then
-            echo "Dockerfile found. Future container scan should run after an image build."
-            echo "Suggested future tools: Trivy or Grype with SARIF upload."
-          else
-            echo "No root Dockerfile found. Container scan skipped."
-          fi
+      - name: Install dependencies
+        run: npm ci
+
+      - name: NPM audit
+        run: npm audit --audit-level=moderate
+
+      - name: Hadolint engine Dockerfile
+        uses: hadolint/hadolint-action@v3.3.0
+        with:
+          dockerfile: Dockerfile.engine
+          failure-threshold: error
+
+      - name: Hadolint admin Dockerfile
+        uses: hadolint/hadolint-action@v3.3.0
+        with:
+          dockerfile: Dockerfile.admin
+          failure-threshold: error
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          format: table
+
+  image-scan:
+    name: Container image scan (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: engine
+            dockerfile: Dockerfile.engine
+            image: kintunnel-engine
+          - service: admin
+            dockerfile: Dockerfile.admin
+            image: kintunnel-admin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image for scanning
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          tags: ${{ matrix.image }}:security-scan
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ matrix.image }}:security-scan
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          format: table

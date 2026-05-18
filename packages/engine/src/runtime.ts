@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { isPeerActive } from "./peers.js";
 import type { EngineConfig, EngineState, ReconcileResult } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -67,7 +68,7 @@ export async function getRuntimeState(config: EngineConfig, state: EngineState):
       exists: true,
       listenPort: state.server.listenPort,
       peers: state.peers
-        .filter((peer) => peer.status === "active")
+        .filter((peer) => isPeerActive(peer))
         .map((peer) => ({
           publicKey: peer.publicKey,
           allowedIps: [peer.addressV4]
@@ -114,7 +115,7 @@ export async function reconcile(config: EngineConfig, state: EngineState): Promi
   const startedAt = new Date().toISOString();
   const messages: string[] = [];
   const errors: string[] = [];
-  const activePeers = state.peers.filter((peer) => peer.status === "active");
+  const activePeers = state.peers.filter((peer) => isPeerActive(peer));
 
   const publicKeys = new Set<string>();
   const addresses = new Set<string>();

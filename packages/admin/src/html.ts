@@ -1,11 +1,18 @@
-import type { EngineStatus, Peer } from "./types";
+import type { AuditEvent, EngineStatus, Peer } from "./types";
 
 export interface LayoutOptions {
   title: string;
   authenticated?: boolean;
+  csrfToken?: string;
   error?: string;
   notice?: string;
   content: string;
+}
+
+export interface PageOptions {
+  csrfToken?: string;
+  error?: string;
+  notice?: string;
 }
 
 export function layout(options: LayoutOptions): string {
@@ -16,24 +23,25 @@ export function layout(options: LayoutOptions): string {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(options.title)} - KinTunnel Admin</title>
   <style>
-    :root { color-scheme: light; --ink:#17202a; --muted:#5d6d7e; --line:#d8dee6; --panel:#f7f9fb; --accent:#0f766e; --danger:#b42318; }
+    :root { color-scheme: light; --ink:#17202a; --muted:#5d6d7e; --line:#d8dee6; --panel:#f7f9fb; --accent:#0f766e; --accent-2:#2563eb; --danger:#b42318; --warn:#b54708; }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: #ffffff; }
     header { border-bottom: 1px solid var(--line); background: #fff; }
     nav { max-width: 1120px; margin: 0 auto; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
     nav a { color: var(--ink); text-decoration: none; font-weight: 650; }
     nav .links { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
-    main { max-width: 1120px; margin: 0 auto; padding: 28px 24px 48px; }
+    main { max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; }
     h1 { margin: 0 0 18px; font-size: 28px; line-height: 1.15; }
     h2 { margin: 28px 0 12px; font-size: 18px; }
     a { color: var(--accent); }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+    .split { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
     .card { border: 1px solid var(--line); border-radius: 8px; padding: 16px; background: #fff; }
     .panel { border: 1px solid var(--line); border-radius: 8px; padding: 18px; background: var(--panel); }
     .muted { color: var(--muted); }
     .flash { border-radius: 8px; padding: 12px 14px; margin-bottom: 18px; border: 1px solid var(--line); background: #f4fbf9; }
     .error { border-color: #f2b8b5; background: #fff4f2; color: var(--danger); }
-    table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background:#fff; }
     th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
     th { background: var(--panel); font-size: 13px; color: var(--muted); }
     tr:last-child td { border-bottom: 0; }
@@ -46,7 +54,15 @@ export function layout(options: LayoutOptions): string {
     .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #0b1220; color: #e9eef7; }
     .qr { width: 220px; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; }
+    .stack { display:flex; flex-direction:column; gap:10px; }
+    .stat strong { display:block; margin-top:4px; font-size:22px; line-height:1.1; }
     .status-pill { display:inline-block; padding: 3px 8px; border-radius: 999px; background:#eef6f5; color:#0f766e; font-size: 12px; font-weight: 700; }
+    .status-pill.revoked { background:#fff7ed; color:var(--warn); }
+    .status-pill.deleted { background:#fff1f2; color:var(--danger); }
+    .event { border-left:3px solid var(--accent); padding:8px 0 8px 10px; }
+    .event strong { display:block; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+    @media (max-width: 860px) { .split { grid-template-columns:1fr; } }
     @media (max-width: 640px) { nav { align-items: flex-start; flex-direction: column; } th:nth-child(3), td:nth-child(3) { display:none; } }
   </style>
 </head>
@@ -55,7 +71,7 @@ export function layout(options: LayoutOptions): string {
     <nav>
       <a href="/">KinTunnel Admin</a>
       <div class="links">
-        ${options.authenticated ? `<a href="/peers/new">Create peer</a><form method="post" action="/logout"><button class="secondary" type="submit">Logout</button></form>` : ""}
+        ${options.authenticated ? `<a href="/peers/new">Create peer</a><form method="post" action="/logout">${csrfField(options.csrfToken)}<button class="secondary" type="submit">Logout</button></form>` : ""}
       </div>
     </nav>
   </header>
@@ -81,32 +97,44 @@ export function loginPage(error?: string): string {
   });
 }
 
-export function dashboardPage(status: EngineStatus, peers: Peer[], notice?: string, error?: string): string {
+export function dashboardPage(status: EngineStatus, peers: Peer[], events: AuditEvent[] = [], options: PageOptions = {}): string {
   return layout({
     title: "Dashboard",
     authenticated: true,
-    notice,
-    error,
+    csrfToken: options.csrfToken,
+    notice: options.notice,
+    error: options.error,
     content: `<h1>Dashboard</h1>
       ${statusCards(status)}
       <div class="actions"><a class="button" href="/peers/new">Create peer</a></div>
-      <h2>Peers</h2>
-      ${peerTable(peers)}`
+      <div class="split">
+        <section>
+          <h2>Peers</h2>
+          ${peerTable(peers)}
+        </section>
+        <aside>
+          <h2>Recent activity</h2>
+          ${eventList(events)}
+        </aside>
+      </div>`
   });
 }
 
-export function newPeerPage(error?: string): string {
+export function newPeerPage(options: PageOptions = {}): string {
   return layout({
     title: "Create peer",
     authenticated: true,
-    error,
+    csrfToken: options.csrfToken,
+    error: options.error,
+    notice: options.notice,
     content: `<h1>Create peer</h1>
       <form method="post" action="/peers" class="panel">
+        ${csrfField(options.csrfToken)}
         <label for="name">Name</label>
         <input id="name" name="name" placeholder="alice-phone" required maxlength="120">
         <label for="public_key">Public key</label>
         <input id="public_key" name="public_key" placeholder="Optional when generating keys server-side">
-        <label><input type="checkbox" name="generate_keys" value="true" style="width:auto"> Generate keys server-side</label>
+        <label><input type="checkbox" name="generate_keys" value="true" style="width:auto" checked> Generate keys server-side</label>
         <label for="allowed_ips">Allowed IPs</label>
         <input id="allowed_ips" name="allowed_ips" placeholder="0.0.0.0/0, ::/0">
         <label for="dns_servers">DNS servers</label>
@@ -118,12 +146,13 @@ export function newPeerPage(error?: string): string {
   });
 }
 
-export function peerDetailPage(peer: Peer, configText: string, qrDataUrl: string, notice?: string, error?: string): string {
+export function peerDetailPage(peer: Peer, options: PageOptions = {}): string {
   return layout({
     title: peer.name,
     authenticated: true,
-    notice,
-    error,
+    csrfToken: options.csrfToken,
+    notice: options.notice,
+    error: options.error,
     content: `<h1>${escapeHtml(peer.name)}</h1>
       <div class="grid">
         <section class="card">
@@ -134,26 +163,31 @@ export function peerDetailPage(peer: Peer, configText: string, qrDataUrl: string
         </section>
         <section class="card">
           <h2>QR code</h2>
-          ${qrDataUrl ? `<img class="qr" src="${escapeAttribute(qrDataUrl)}" alt="WireGuard config QR code">` : `<p class="muted">Config not available yet.</p>`}
+          <div class="actions"><a class="button secondary" href="/peers/${escapeAttribute(peer.id)}/config.png">Open QR</a></div>
         </section>
       </div>
       <h2>Client config</h2>
-      ${configText ? `<pre>${escapeHtml(configText)}</pre>` : `<p class="muted">The engine did not return a client config.</p>`}
       <div class="actions">
-        <form method="post" action="/peers/${escapeAttribute(peer.id)}/revoke"><button class="danger" type="submit">Revoke</button></form>
-        <form method="post" action="/peers/${escapeAttribute(peer.id)}/delete"><button class="danger" type="submit">Delete</button></form>
+        <a class="button" href="/peers/${escapeAttribute(peer.id)}/config.conf">Download config</a>
+        <form method="post" action="/peers/${escapeAttribute(peer.id)}/revoke">${csrfField(options.csrfToken)}<button class="danger" type="submit">Revoke</button></form>
+        <form method="post" action="/peers/${escapeAttribute(peer.id)}/delete">${csrfField(options.csrfToken)}<button class="danger" type="submit">Delete</button></form>
         <a class="button secondary" href="/">Back</a>
       </div>`
   });
 }
 
+function csrfField(token?: string): string {
+  return token ? `<input type="hidden" name="_csrf" value="${escapeAttribute(token)}">` : "";
+}
+
 function statusCards(status: EngineStatus): string {
   const peerCounts = status.peers ?? {};
+  const mode = status.dry_run === false ? "host networking" : "dry-run";
   return `<div class="grid">
-    <div class="card"><div class="muted">Engine</div><strong>${escapeHtml(status.ready === false ? "Not ready" : "Reachable")}</strong></div>
-    <div class="card"><div class="muted">Interface</div><strong>${escapeHtml(status.interface?.name ?? "unknown")}</strong></div>
-    <div class="card"><div class="muted">Active peers</div><strong>${escapeHtml(String(peerCounts.active ?? peerCounts.total ?? "unknown"))}</strong></div>
-    <div class="card"><div class="muted">Last checked</div><strong>${escapeHtml(status.checked_at ?? new Date().toISOString())}</strong></div>
+    <div class="card stat"><div class="muted">Engine</div><strong>${escapeHtml(status.ready === false ? "Not ready" : "Reachable")}</strong><div class="muted">${escapeHtml(mode)}</div></div>
+    <div class="card stat"><div class="muted">Interface</div><strong>${escapeHtml(status.interface?.name ?? status.server?.interfaceName ?? "unknown")}</strong><div class="muted">${escapeHtml(String(status.interface?.listen_port ?? status.server?.listenPort ?? "port unknown"))}</div></div>
+    <div class="card stat"><div class="muted">Active peers</div><strong>${escapeHtml(String(peerCounts.active ?? 0))}</strong><div class="muted">${escapeHtml(String(peerCounts.total ?? 0))} total</div></div>
+    <div class="card stat"><div class="muted">Revision</div><strong>${escapeHtml(String(status.revision ?? "n/a"))}</strong><div class="muted">${escapeHtml(formatDate(status.checked_at))}</div></div>
   </div>`;
 }
 
@@ -167,12 +201,42 @@ function peerTable(peers: Peer[]): string {
     <tbody>
       ${peers.map((peer) => `<tr>
         <td><a href="/peers/${escapeAttribute(peer.id)}">${escapeHtml(peer.name)}</a></td>
-        <td>${escapeHtml(peer.status ?? "unknown")}</td>
+        <td>${statusPill(peer.status)}</td>
         <td>${escapeHtml(peer.address_v4 ?? peer.address_v6 ?? "")}</td>
         <td>${escapeHtml(peer.last_handshake_at ?? "never")}</td>
       </tr>`).join("")}
     </tbody>
   </table>`;
+}
+
+function eventList(events: AuditEvent[]): string {
+  if (events.length === 0) {
+    return `<div class="card muted">No activity recorded yet.</div>`;
+  }
+
+  return `<div class="card stack">
+    ${events.map((event) => `<div class="event">
+      <strong>${escapeHtml(eventLabel(event))}</strong>
+      <span class="muted">${escapeHtml(formatDate(event.created_at))}${event.revision ? ` | rev ${escapeHtml(String(event.revision))}` : ""}</span>
+    </div>`).join("")}
+  </div>`;
+}
+
+function eventLabel(event: AuditEvent): string {
+  const target = event.target_name ? `: ${event.target_name}` : "";
+  return `${event.action.replaceAll(".", " ")}${target}`;
+}
+
+function statusPill(status = "unknown"): string {
+  const klass = status === "revoked" || status === "deleted" ? ` ${status}` : "";
+  return `<span class="status-pill${klass}">${escapeHtml(status)}</span>`;
+}
+
+function formatDate(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) return "not checked";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString().replace("T", " ").replace(".000Z", "Z");
 }
 
 export function escapeHtml(value: string): string {

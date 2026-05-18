@@ -13,10 +13,14 @@ This project follows the spirit of Keep a Changelog and intends to use semantic 
 - Security, contribution, conduct, roadmap, and notice documents.
 - README positioning for an original Docker-native family VPN manager for WireGuard deployments.
 - Process-level integration coverage for the dry-run engine and admin HTTP client peer lifecycle.
+- Engine API token authentication.
+- Admin config download, no-store sensitive response headers, and recent activity view.
+- Engine audit events for state initialization, peer lifecycle, and reconcile actions.
 
 ### Changed
 
-- README and operator docs now describe the runnable dry-run MVP, Docker image names, build commands, and current non-dry-run limitations.
+- README and operator docs now describe the runnable dry-run MVP, source-build Docker flow, build commands, and current non-dry-run limitations.
+- Engine defaults now fail closed into dry-run mode unless host networking is explicitly acknowledged.
 
 ### Deprecated
 

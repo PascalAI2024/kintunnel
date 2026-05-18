@@ -30,13 +30,13 @@ From the repository root:
 ```sh
 npm ci
 npm test
-KINTUNNEL_DRY_RUN=true KINTUNNEL_ENGINE_PORT=9090 npm run dev:engine
+KINTUNNEL_ENV=development KINTUNNEL_DRY_RUN=true KINTUNNEL_ENGINE_API_TOKEN=dev-engine-token-change-me KINTUNNEL_ENGINE_PORT=9090 npm run dev:engine
 ```
 
 In another shell:
 
 ```sh
-KINTUNNEL_ADMIN_TOKEN=change-me KINTUNNEL_ENGINE_URL=http://127.0.0.1:9090 npm run dev:admin
+KINTUNNEL_ENV=development KINTUNNEL_ADMIN_TOKEN=dev-admin-token-change-me KINTUNNEL_ENGINE_API_TOKEN=dev-engine-token-change-me KINTUNNEL_ENGINE_URL=http://127.0.0.1:9090 npm run dev:admin
 ```
 
 Open `http://127.0.0.1:8080` and use the configured admin token.
@@ -56,6 +56,7 @@ cd kintunnel
 cp .env.example .env
 mkdir -p config/secrets
 openssl rand -base64 32 > config/secrets/admin-token.txt
+openssl rand -base64 32 > config/secrets/engine-api-token.txt
 ```
 
 3. Edit `.env` using [environment-variables.md](configuration/environment-variables.md). At minimum, set `KINTUNNEL_PUBLIC_ENDPOINT`.
@@ -96,7 +97,7 @@ The response should be the VPS public IP when using full tunnel mode.
 
 ## Early Production Checklist
 
-- Use a strong admin password.
+- Use a strong admin token stored outside source control.
 - Restrict admin UI access by IP allowlist, VPN-only access, or SSH tunnel.
 - Back up the persistent data and backup volumes.
 - Keep one peer per device, not one peer per family.

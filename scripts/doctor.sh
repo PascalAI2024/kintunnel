@@ -39,10 +39,16 @@ else
   warn "config/kintunnel.yml missing; copy config/kintunnel.example.yml when runtime config lands"
 fi
 
-if [[ -f config/secrets/session-secret.txt ]]; then
-  pass "admin session secret file exists"
+if [[ -f config/secrets/admin-token.txt ]]; then
+  pass "admin token file exists"
 else
-  warn "config/secrets/session-secret.txt missing; create it with a long random value before enabling admin"
+  warn "config/secrets/admin-token.txt missing; create it with: openssl rand -base64 32 > config/secrets/admin-token.txt"
+fi
+
+if [[ -f config/secrets/engine-api-token.txt ]]; then
+  pass "engine API token file exists"
+else
+  warn "config/secrets/engine-api-token.txt missing; create it with: openssl rand -base64 32 > config/secrets/engine-api-token.txt"
 fi
 
 if [[ -c /dev/net/tun ]]; then

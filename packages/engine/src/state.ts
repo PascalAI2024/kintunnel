@@ -3,7 +3,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { allocatePeerAddress, parseIpv4Cidr, numberToIpv4 } from "./ip.js";
 import { generateKeyPair } from "./keys.js";
-import type { EngineConfig, EngineState, PeerRecord } from "./types.js";
+import { validateAllowedIp, validateDnsServer, validateExpiresAt, validatePeerName, validateWireGuardKey } from "./peers.js";
+import type { AuditAction, AuditEvent, EngineConfig, EngineState, PeerRecord } from "./types.js";
+
+const MAX_AUDIT_EVENTS = 250;
 
 const allowedPeerCreateFields = new Set([
   "name",
@@ -85,6 +88,12 @@ export class StateStore {
       peer.deletedAt = now;
       peer.updatedAt = now;
       state.revision += 1;
+      this.appendEvent(state, {
+        action: "peer.deleted",
+        targetId: peer.id,
+        targetName: peer.name,
+        createdAt: now
+      });
 
       return peer;
     });
@@ -102,9 +111,41 @@ export class StateStore {
       peer.revokedAt = now;
       peer.updatedAt = now;
       state.revision += 1;
+      this.appendEvent(state, {
+        action: "peer.revoked",
+        targetId: peer.id,
+        targetName: peer.name,
+        createdAt: now
+      });
 
       return peer;
     });
+  }
+
+  appendEvent(
+    state: EngineState,
+    event: {
+      action: AuditAction;
+      createdAt?: string;
+      actor?: string;
+      targetId?: string;
+      targetName?: string;
+      metadata?: AuditEvent["metadata"];
+    }
+  ): AuditEvent {
+    const record: AuditEvent = {
+      id: randomUUID(),
+      action: event.action,
+      actor: event.actor ?? "engine",
+      targetId: event.targetId,
+      targetName: event.targetName,
+      revision: state.revision,
+      createdAt: event.createdAt ?? new Date().toISOString(),
+      metadata: event.metadata
+    };
+
+    state.events = [...(state.events ?? []), record].slice(-MAX_AUDIT_EVENTS);
+    return record;
   }
 
   async update<T>(mutate: (state: EngineState) => Promise<T> | T): Promise<T> {
@@ -173,6 +214,16 @@ export class StateStore {
 
     state.peers.push(peer);
     state.revision += 1;
+    this.appendEvent(state, {
+      action: "peer.created",
+      targetId: peer.id,
+      targetName: peer.name,
+      createdAt: now,
+      metadata: {
+        address_v4: peer.addressV4,
+        generated_keys: generated
+      }
+    });
     return peer;
   }
 
@@ -200,7 +251,21 @@ export class StateStore {
         forwardingRequired: this.config.forwardingRequired,
         updatedAt: now
       },
-      peers: []
+      peers: [],
+      events: [
+        {
+          id: randomUUID(),
+          action: "state.initialized",
+          actor: "engine",
+          revision: 1,
+          createdAt: now,
+          metadata: {
+            interface: this.config.interfaceName,
+            tunnel_cidr_v4: this.config.tunnelCidrV4,
+            dry_run: this.config.dryRun
+          }
+        }
+      ]
     };
   }
 
@@ -243,18 +308,44 @@ export class StateStore {
     if (typeof name !== "string" || name.trim().length === 0) {
       throw new ValidationError("Request validation failed.", { name: ["is required"] });
     }
+    const nameError = validatePeerName(name.trim());
+    if (nameError) {
+      throw new ValidationError("Request validation failed.", { name: [nameError] });
+    }
 
     const rawPublicKey = body.public_key ?? body.publicKey;
     const publicKey = optionalString(rawPublicKey, "public_key");
+    if (publicKey) {
+      const keyError = validateWireGuardKey(publicKey);
+      if (keyError) throw new ValidationError("Request validation failed.", { public_key: [keyError] });
+    }
+
+    const allowedIps = optionalStringList(body.allowed_ips ?? body.allowedIps, "allowed_ips");
+    const invalidAllowedIp = allowedIps?.find((item) => validateAllowedIp(item));
+    if (invalidAllowedIp) {
+      throw new ValidationError("Request validation failed.", { allowed_ips: [`${invalidAllowedIp}: ${validateAllowedIp(invalidAllowedIp)}`] });
+    }
+
+    const dnsServers = optionalStringList(body.dns_servers ?? body.dnsServers, "dns_servers");
+    const invalidDns = dnsServers?.find((item) => validateDnsServer(item));
+    if (invalidDns) {
+      throw new ValidationError("Request validation failed.", { dns_servers: [`${invalidDns}: ${validateDnsServer(invalidDns)}`] });
+    }
+
+    const expiresAt = optionalString(body.expires_at ?? body.expiresAt, "expires_at");
+    if (expiresAt) {
+      const expiryError = validateExpiresAt(expiresAt);
+      if (expiryError) throw new ValidationError("Request validation failed.", { expires_at: [expiryError] });
+    }
 
     return {
       name,
       publicKey,
       generateKeys: optionalBool(body.generate_keys ?? body.generateKeys, "generate_keys") ?? !publicKey,
-      allowedIps: optionalStringList(body.allowed_ips ?? body.allowedIps, "allowed_ips"),
-      dnsServers: optionalStringList(body.dns_servers ?? body.dnsServers, "dns_servers"),
+      allowedIps,
+      dnsServers,
       persistentKeepalive: optionalNumber(body.persistent_keepalive ?? body.persistentKeepalive, "persistent_keepalive"),
-      expiresAt: optionalString(body.expires_at ?? body.expiresAt, "expires_at")
+      expiresAt
     };
   }
 }
@@ -277,8 +368,8 @@ function optionalBool(value: unknown, field: string): boolean | undefined {
 
 function optionalNumber(value: unknown, field: string): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new ValidationError("Request validation failed.", { [field]: ["must be a non-negative integer"] });
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 65535) {
+    throw new ValidationError("Request validation failed.", { [field]: ["must be an integer from 0 to 65535"] });
   }
   return value;
 }

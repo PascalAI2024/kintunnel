@@ -12,7 +12,8 @@ nav:
   - Home: index.md
   - Quick Start: quick-start.md
   - Architecture: architecture.md
-  - Research: vpn-research.md
+  - Brand: brand.md
+  - Release Checklist: release-checklist.md
   - Installation:
       - Docker Compose: installation/docker-compose.md
       - Dokploy Swarm: installation/dokploy-swarm.md
@@ -26,3 +27,4 @@ nav:
       - Security Model: security/security-model.md
   - Troubleshooting:
       - Overview: troubleshooting/index.md
+  - History / Prior Art: vpn-research.md

@@ -13,9 +13,11 @@ This project is pre-release. Security fixes will target the main development lin
 
 ## Reporting a Vulnerability
 
-Please report security vulnerabilities privately.
+Please report security vulnerabilities privately through GitHub private vulnerability reporting:
 
-Until a dedicated security address is published, use the repository owner's private contact channel or GitHub private vulnerability reporting if enabled.
+- [Open a private vulnerability report](https://github.com/PascalAI2024/kintunnel/security/advisories/new).
+- Do not open a public issue, discussion, or pull request for active vulnerabilities.
+- Do not include live credentials, private keys, peer configs, or QR codes unless they are test-only samples.
 
 Include:
 
@@ -24,7 +26,7 @@ Include:
 - Impact and affected configurations.
 - Any logs, screenshots, or proof-of-concept details that help confirm the issue.
 
-Do not open a public issue for active vulnerabilities.
+Reports are handled in a private GitHub security advisory draft until disclosure is safe. If the issue is accepted, fixes target the main development line first while the project is pre-release.
 
 ## Security Expectations
 
@@ -44,8 +46,8 @@ The following are usually outside this project's direct control:
 
 - Misconfigured VPS firewalls.
 - Compromised host operating systems.
-- Weak admin passwords outside project defaults.
+- Weak admin tokens or credentials outside project defaults.
 - Abuse complaints caused by traffic exiting through the operator's VPS.
 - Privacy guarantees against the VPS provider, upstream network, or destination services.
 
-If the software encourages an unsafe default, that is in scope. If the operator publishes the admin panel to the entire internet with `password123`, that is an educational opportunity.
+If the software encourages an unsafe default, that is in scope. If the operator publishes the admin panel to the entire internet with a reused token or weak credential, that is an educational opportunity.
