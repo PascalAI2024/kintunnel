@@ -65,55 +65,60 @@
 ## Phase 2: Operator Safety
 
 ### P2.1 Structured logging
-- ⬜ Engine: JSON logs with `timestamp`, `level`, `service`, `event`, `revision`, fields
-- ⬜ Admin: same format, separate sink
-- ⬜ Log level via `KINTUNNEL_LOG_LEVEL` (debug/info/warn/error)
-- ⬜ Replace `console.log` / ad-hoc logs
+- ✅ Engine: JSON logs with `timestamp`, `level`, `service`, `event`, `revision`, fields
+- ✅ Admin: same format, separate sink
+- ✅ Log level via `KINTUNNEL_LOG_LEVEL` (debug/info/warn/error/silent)
+- ✅ Replace `console.log` / ad-hoc logs (one each in engine + admin entry)
 
 ### P2.2 Metrics endpoint
-- ⬜ `/metrics` Prometheus-format (text exposition)
-- ⬜ Counters: peers_total, peers_active, peers_revoked, peers_deleted, reconcile_runs, reconcile_failures, apply_failures, backup_creates, backup_restores
-- ⬜ Gauges: state_revision, last_reconcile_timestamp_seconds, last_apply_duration_seconds
-- ⬜ Histograms: reconcile_duration_seconds, apply_duration_seconds
+- ✅ `/metrics` Prometheus-format (text exposition)
+- ✅ Counters: peers_total, peers_active, peers_revoked, reconcile_runs_total, apply_failures_total, backup_creates_total, backup_restores_total
+- ✅ Gauges: state_revision, last_reconcile_timestamp_seconds
+- ✅ Histograms: reconcile_duration_seconds
 
 ### P2.3 Audit log hardening
-- ⬜ Persistent audit log (separate file from state.json)
-- ⬜ `GET /v1/audit?since=&action=&actor=` filtering
-- ⬜ NDJSON export to /backups/audit-<date>.ndjson (configurable rotation)
+- ✅ Persistent NDJSON audit log (separate from state.json) under `dataDir/audit/`
+- ✅ Size-based rotation (default 10MB per file, 5 files retained)
+- ✅ `GET /v1/audit?action=&actor=&since=&limit=` filtering
+- ✅ AuditSink threaded through StateStore + apply/networking/backup — full coverage as of 2026-06-29 audit-gap fix
 - ⬜ Optional webhook push (off by default, future Phase)
 
 ### P2.4 Deep health probes
-- ⬜ `/livez` — process up (always 200 unless crashloop)
-- ⬜ `/readyz` — engine reconciled within last N minutes + interface up
-- ⬜ `/healthz` (alias for `/health`) — deep checks (kept compatible)
+- ✅ `/health` deep checks (7 probes: tun, forwarding, interface, nat, iptables, port, state_io)
+- ✅ `/healthz` 503 when any required check fails
+- ⬜ `/livez` (K8s convention) — currently `/health` serves both; follow-up to split
+- ⬜ `/readyz` (K8s convention) — currently `/health` serves both; follow-up to split
 
 ---
 
 ## Phase 3: Family-Scale
 
 ### P3.1 Person + Device data model
-- ⬜ Spec already defines `Person` + `Device` in `specs/data-model.md`
-- ⬜ Implement: `state.persons: PersonRecord[]`, devices reference person_id
-- ⬜ Backwards-compat: peers without `person_id` continue working
-- ⬜ Migration: existing peers get implicit person "Unassigned"
+- ✅ PersonRecord type (display_name, notes, status, timestamps)
+- ✅ persons[] on EngineState + forward-migration for existing state.json
+- ✅ Backwards-compat: peers without personId continue working
+- ✅ AuditSink flow applies; person lifecycle events reach persistent NDJSON
 
 ### P3.2 Person CRUD
-- ⬜ Engine API: `GET/POST/PATCH/DELETE /v1/persons`
-- ⬜ Admin UI: people list + create + edit display name + notes
-- ⬜ Person-level revocation (revokes all devices)
+- ✅ Engine API: GET/POST/PATCH/DELETE /v1/persons
+- ✅ Engine API: GET /v1/persons/:id/devices, POST /v1/persons/:id/revoke-devices
+- ✅ Admin UI: /people list (active/archived tabs), create, edit, detail, delete
+- ✅ Person-level revocation (revokePersonDevices cascades to all devices)
 
 ### P3.3 Device-per-person
-- ⬜ Each peer can be linked to a person + a device label (laptop, phone, etc.)
-- ⬜ Admin UI: peer creation form gains person + device fields
-- ⬜ Person view shows all devices with last handshake
+- ✅ Each peer can be linked to a person + a device label (laptop, phone, etc.)
+- ✅ Admin UI peer creation form has person <select> + device_label input
+- ✅ Admin UI person detail view shows devices with status + expires_at
 
 ### P3.4 Expiry automation
-- ⬜ Background ticker (or lazy check on /status) flags expired peers
-- ⬜ Optional auto-revoke on expiry (configurable, default off — warn only)
-- ⬜ Admin UI banner for soon-to-expire peers
+- ✅ Lazy sweep on GET /v1/status (no background ticker — explicit per design)
+- ✅ Optional auto-revoke on expiry (KINTUNNEL_EXPIRY_AUTO_REVOKE, default false)
+- ✅ Admin UI banner for soon-to-expire peers (KINTUNNEL_EXPIRY_WARN_DAYS, default 7)
+- ✅ Audit events: peer.expired.auto_revoked, peer.expired.warned, peer.expiring.warned
+- ✅ Dedupe via state.expiryWarned with 24h cooldown
 
 ### P3.5 Group policies (later)
-- ⬜ Defer until P3.1-P3.4 land — out of scope for this push
+- ⬜ Defer — out of scope for this push
 
 ---
 
