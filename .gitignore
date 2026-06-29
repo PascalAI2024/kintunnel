@@ -58,3 +58,6 @@ backups/
 tmp/
 temp/
 *.tmp
+
+# Workflow scratch (agent research artifacts, never committed)
+.workflow-research/
