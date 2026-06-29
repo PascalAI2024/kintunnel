@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
+import type { LogLevel } from "./logger.js";
 import type { EngineConfig } from "./types.js";
 
 const MIN_PRODUCTION_API_TOKEN_LENGTH = 32;
@@ -92,7 +93,49 @@ function listEnv(name: string, fallback: string[]): string[] {
     .filter(Boolean);
 }
 
-export function loadConfig(overrides: Partial<EngineConfig> = {}): EngineConfig {
+const VALID_LOG_LEVELS: LogLevel[] = ["debug", "info", "warn", "error", "silent"];
+
+function logLevelEnv(overrides: Partial<EngineConfig>): LogLevel {
+  const fromOverride = (overrides as { logLevel?: LogLevel }).logLevel;
+  if (fromOverride) {
+    if (!VALID_LOG_LEVELS.includes(fromOverride)) {
+      throw new Error(
+        `KINTUNNEL_LOG_LEVEL must be one of ${VALID_LOG_LEVELS.join(", ")}; got "${fromOverride}"`
+      );
+    }
+    return fromOverride;
+  }
+  const raw = process.env.KINTUNNEL_LOG_LEVEL;
+  if (!raw) return "info";
+  const normalized = raw.toLowerCase() as LogLevel;
+  if (!VALID_LOG_LEVELS.includes(normalized)) {
+    throw new Error(
+      `KINTUNNEL_LOG_LEVEL must be one of ${VALID_LOG_LEVELS.join(", ")}; got "${raw}"`
+    );
+  }
+  return normalized;
+}
+
+/**
+ * The resolved engine config carries extra fields that are not yet in the
+ * shared `EngineConfig` type. The intersection keeps backwards compatibility
+ * with existing call sites typed as `EngineConfig` while surfacing the
+ * logger level and audit-store settings to callers like `index.ts` and
+ * `app.ts`.
+ */
+export type ResolvedEngineConfig = EngineConfig & {
+  logLevel: LogLevel;
+  auditLogDir: string;
+  auditLogMaxBytes: number;
+  auditLogRetentionCount: number;
+};
+
+export function loadConfig(overrides: Partial<EngineConfig> = {}): ResolvedEngineConfig {
+  const auditOverrides = overrides as Partial<EngineConfig> & {
+    auditLogDir?: string;
+    auditLogMaxBytes?: number;
+    auditLogRetentionCount?: number;
+  };
   const env = overrides.env ?? process.env.KINTUNNEL_ENV ?? "production";
   const dataDir = overrides.dataDir ?? process.env.KINTUNNEL_DATA_DIR ?? path.resolve(".", "data", "engine");
   const listenPort = overrides.listenPort ?? intEnv("KINTUNNEL_WG_LISTEN_PORT", 51820);
@@ -140,7 +183,16 @@ export function loadConfig(overrides: Partial<EngineConfig> = {}): EngineConfig 
       overrides.backupLockTimeoutMs ?? intEnvInRange("KINTUNNEL_BACKUP_LOCK_TIMEOUT_MS", 30000, 1000, 300000),
     applyBootstrapTimeoutMs:
       overrides.applyBootstrapTimeoutMs ?? intEnvInRange("KINTUNNEL_APPLY_BOOTSTRAP_TIMEOUT_MS", 15000, 1000, 120000),
-    wgEgressInterface: overrides.wgEgressInterface ?? egressIfaceEnv()
+    wgEgressInterface: overrides.wgEgressInterface ?? egressIfaceEnv(),
+    logLevel: logLevelEnv(overrides),
+    auditLogDir:
+      auditOverrides.auditLogDir ?? absolutePathEnv("KINTUNNEL_AUDIT_LOG_DIR", path.join(dataDir, "audit")),
+    auditLogMaxBytes:
+      auditOverrides.auditLogMaxBytes ??
+      intEnvInRange("KINTUNNEL_AUDIT_LOG_ROTATION_BYTES", 10485760, 1024, 1073741824),
+    auditLogRetentionCount:
+      auditOverrides.auditLogRetentionCount ??
+      intEnvInRange("KINTUNNEL_AUDIT_LOG_RETENTION_COUNT", 5, 1, 100)
   };
 }
 
