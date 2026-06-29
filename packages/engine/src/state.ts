@@ -7,6 +7,100 @@ import { validateAllowedIp, validateDnsServer, validateExpiresAt, validatePeerNa
 import type { AuditAction, AuditEvent, EngineConfig, EngineState, PeerRecord } from "./types.js";
 
 const MAX_AUDIT_EVENTS = 250;
+const FILE_MODE_PRIVATE = 0o600;
+
+/**
+ * Reusable atomic write: write to a uniquely-named temp file in the same
+ * directory, then `rename(2)` over the target. POSIX `rename` is atomic on
+ * the same filesystem, so readers either see the previous content or the new
+ * content — never a half-written file.
+ *
+ * Used by `StateStore.save` and by the backup module's snapshot writer
+ * (Wave 4). Throws if the parent directory cannot be created or if the
+ * rename fails; partial writes are cleaned up implicitly because the temp
+ * file name is unique per call.
+ */
+export async function atomicWriteFile(
+  targetPath: string,
+  content: string | Buffer,
+  options: { mode?: number; encoding?: BufferEncoding } = {}
+): Promise<void> {
+  const dir = path.dirname(targetPath);
+  await fs.mkdir(dir, { recursive: true });
+  const base = path.basename(targetPath);
+  const tempPath = path.join(
+    dir,
+    `.${base}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2, 10)}.tmp`
+  );
+  try {
+    await fs.writeFile(tempPath, content, {
+      encoding: (options.encoding ?? "utf8") as BufferEncoding,
+      mode: options.mode ?? FILE_MODE_PRIVATE
+    });
+    await fs.rename(tempPath, targetPath);
+  } catch (error) {
+    // Best-effort cleanup: if the temp file exists and rename failed, unlink it.
+    await fs.unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * Acquire a BSD-style advisory file lock around `fn`. The lock is keyed by
+ * the lockPath file — multiple processes contending for the same path will
+ * serialize. Different lockPaths are independent. Implemented via
+ * `FileHandle#flock` (Node >= 22). The lock is released when the returned
+ * promise settles (success or failure) by closing the underlying fd.
+ *
+ * NOTE: `flock` is acquired by the calling process; concurrent calls with
+ * the same path from the same process block on each other as expected.
+ * The `timeoutMs` bounds the wait via a race; if it fires we throw with
+ * `code = "ELOCKTIMEOUT"` and release. Callers (e.g. backup.ts) should
+ * map that to HTTP 409.
+ */
+export async function withFileLock<T>(
+  lockPath: string,
+  fn: () => Promise<T>,
+  options: { timeoutMs: number }
+): Promise<T> {
+  await fs.mkdir(path.dirname(lockPath), { recursive: true });
+  const fd = await fs.open(lockPath, "w");
+  try {
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        const err = new Error(
+          `Timed out acquiring file lock at ${lockPath} after ${options.timeoutMs}ms`
+        );
+        (err as NodeJS.ErrnoException).code = "ELOCKTIMEOUT";
+        reject(err);
+      }, options.timeoutMs);
+    });
+    const acquire = (async () => {
+      // `FileHandle#flock` is added in Node 22.0.0. The runtime is locked
+      // to >=22 (see root package.json `engines.node`), so this call is
+      // safe at runtime; the @types/node version in devDeps may not yet
+      // declare the method, hence the narrow cast.
+      await (fd as unknown as { flock(): Promise<void> }).flock();
+    })();
+    try {
+      await Promise.race([acquire, timeoutPromise]);
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }
+    return await fn();
+  } finally {
+    // Closing the fd releases the BSD flock automatically; the lock
+    // survives even if acquisition raced with timeout because flock is
+    // held on the kernel fd object, not the JS Promise.
+    await fd.close().catch(() => undefined);
+  }
+}
+
+/** Files in the data dir that look like leftover temp files from a crashed
+ * save() or interrupted restore. Matched by the `*.tmp` suffix; we keep the
+ * pattern conservative so a future legitimate file is not deleted. */
+const STRAY_TEMP_PATTERN = /\.tmp$/;
 
 const allowedPeerCreateFields = new Set([
   "name",
@@ -40,6 +134,9 @@ export class StateStore {
 
   async load(): Promise<EngineState> {
     await fs.mkdir(this.config.dataDir, { recursive: true });
+    // Stray temp files from an interrupted save() or restore() are removed
+    // silently so the next load() never reads a half-written state.
+    await this.cleanupStrayTempFiles();
     try {
       const raw = await fs.readFile(this.config.statePath, "utf8");
       return JSON.parse(raw) as EngineState;
@@ -50,14 +147,23 @@ export class StateStore {
   }
 
   async save(state: EngineState): Promise<void> {
-    await fs.mkdir(this.config.dataDir, { recursive: true });
-    const tempPath = path.join(
-      this.config.dataDir,
-      `.state.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
-    );
     const payload = `${JSON.stringify(state, null, 2)}\n`;
-    await fs.writeFile(tempPath, payload, { encoding: "utf8", mode: 0o600 });
-    await fs.rename(tempPath, this.config.statePath);
+    await atomicWriteFile(this.config.statePath, payload);
+  }
+
+  private async cleanupStrayTempFiles(): Promise<void> {
+    try {
+      const entries = await fs.readdir(this.config.dataDir);
+      const stray = entries.filter((name) => STRAY_TEMP_PATTERN.test(name));
+      await Promise.all(
+        stray.map((name) =>
+          fs.unlink(path.join(this.config.dataDir, name)).catch(() => undefined)
+        )
+      );
+    } catch {
+      // best-effort: don't fail boot if cleanup can't run (e.g. dataDir
+      // just-created and we raced another writer, or permission denied).
+    }
   }
 
   async createPeer(input: unknown): Promise<PeerRecord> {

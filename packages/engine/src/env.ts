@@ -27,6 +27,62 @@ function intEnv(name: string, fallback: number): number {
   return value;
 }
 
+function intEnvInRange(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isInteger(value)) throw new Error(`${name} must be an integer`);
+  if (value < min || value > max) {
+    throw new Error(`${name} must be an integer in the range [${min}, ${max}] (got ${value})`);
+  }
+  return value;
+}
+
+const EGRESS_IFACE_REGEX = /^[a-zA-Z0-9_.-]{1,16}$/;
+
+function egressIfaceEnv(): string | undefined {
+  const raw = process.env.KINTUNNEL_WG_EGRESS_INTERFACE;
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  if (!EGRESS_IFACE_REGEX.test(trimmed)) {
+    throw new Error(
+      `KINTUNNEL_WG_EGRESS_INTERFACE must match ${EGRESS_IFACE_REGEX.source} (linux IFNAMSIZ limit); got "${raw}"`
+    );
+  }
+  return trimmed;
+}
+
+function absolutePathEnv(name: string, fallback: string): string {
+  const raw = process.env[name];
+  const value = raw && raw.trim().length > 0 ? raw.trim() : fallback;
+  if (!path.isAbsolute(value)) {
+    throw new Error(`${name} must be an absolute path; got "${value}"`);
+  }
+  return value;
+}
+
+/**
+ * Best-effort check that two paths live on the same filesystem, so a
+ * cross-fs `rename(2)` doesn't lose the atomicity guarantee for the
+ * restore safety snapshot. Logs a warning when they differ but does
+ * NOT fail boot — operators may legitimately split volumes.
+ */
+function warnIfDifferentFilesystem(a: string, b: string): void {
+  try {
+    const aStat = fs.statfsSync(a);
+    const bStat = fs.statfsSync(b);
+    if (aStat.type !== bStat.type) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[kintunnel] WARNING: KINTUNNEL_BACKUP_DIR (${b}) is on a different filesystem than KINTUNNEL_DATA_DIR (${a}); restore's atomic rename may not be preserved.`
+      );
+    }
+  } catch {
+    // best-effort: don't fail boot if statfs fails
+  }
+}
+
 function listEnv(name: string, fallback: string[]): string[] {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -52,6 +108,13 @@ export function loadConfig(overrides: Partial<EngineConfig> = {}): EngineConfig 
   }
   assertStrongEngineApiToken(apiToken, env);
 
+  // NEW (P1.2 / P1.3): resolve and validate the new env vars.
+  // `overrides.* ?? env(...)` so unit tests can pin a value without touching process.env.
+  const backupDir = overrides.backupDir ?? absolutePathEnv("KINTUNNEL_BACKUP_DIR", "/backups");
+  const natApply = overrides.natApply ?? boolEnv(process.env.KINTUNNEL_NAT_APPLY, false);
+  // Warn (don't fail) if backup dir crosses filesystem boundary from data dir.
+  warnIfDifferentFilesystem(dataDir, backupDir);
+
   return {
     env,
     port: overrides.port ?? intEnv("KINTUNNEL_ENGINE_PORT", 9090),
@@ -68,7 +131,16 @@ export function loadConfig(overrides: Partial<EngineConfig> = {}): EngineConfig 
     defaultDnsServers: overrides.defaultDnsServers ?? listEnv("KINTUNNEL_DNS_SERVERS", ["1.1.1.1"]),
     persistentKeepalive: overrides.persistentKeepalive ?? intEnv("KINTUNNEL_PERSISTENT_KEEPALIVE", 25),
     natEnabled: overrides.natEnabled ?? boolEnv(process.env.KINTUNNEL_NAT_ENABLED, true),
-    forwardingRequired: overrides.forwardingRequired ?? boolEnv(process.env.KINTUNNEL_FORWARDING_REQUIRED, true)
+    forwardingRequired: overrides.forwardingRequired ?? boolEnv(process.env.KINTUNNEL_FORWARDING_REQUIRED, true),
+    natApply,
+    backupDir,
+    backupRetentionCount:
+      overrides.backupRetentionCount ?? intEnvInRange("KINTUNNEL_BACKUP_RETENTION_COUNT", 10, 1, 1000),
+    backupLockTimeoutMs:
+      overrides.backupLockTimeoutMs ?? intEnvInRange("KINTUNNEL_BACKUP_LOCK_TIMEOUT_MS", 30000, 1000, 300000),
+    applyBootstrapTimeoutMs:
+      overrides.applyBootstrapTimeoutMs ?? intEnvInRange("KINTUNNEL_APPLY_BOOTSTRAP_TIMEOUT_MS", 15000, 1000, 120000),
+    wgEgressInterface: overrides.wgEgressInterface ?? egressIfaceEnv()
   };
 }
 
