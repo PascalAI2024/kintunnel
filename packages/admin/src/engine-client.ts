@@ -1,4 +1,4 @@
-import type { AuditEvent, EngineStatus, Peer, PeerCreateInput } from "./types";
+import type { AdminPerson, AuditEvent, EngineStatus, Peer, PeerCreateInput } from "./types";
 
 export class EngineError extends Error {
   constructor(
@@ -20,6 +20,27 @@ export interface EngineClient {
   getPeerConfig(id: string): Promise<string>;
   revokePeer(id: string): Promise<void>;
   deletePeer(id: string): Promise<void>;
+  // P3.4 — expiry automation: list soon-to-expire peers for the banner.
+  listExpiring(days?: number): Promise<{
+    expiring_soon: Array<{ peer_id: string; name: string; expires_at: string; days_remaining: number }>;
+    warn_within_days: number;
+    generated_at: string;
+  }>;
+  // P3.1 — Person CRUD + person-scoped device revocation
+  listPersons(filter?: { status?: "active" | "archived" }): Promise<AdminPerson[]>;
+  getPerson(id: string): Promise<AdminPerson>;
+  createPerson(input: { displayName: string; notes?: string }): Promise<AdminPerson>;
+  updatePerson(
+    id: string,
+    patch: { displayName?: string; notes?: string | null; status?: "active" | "archived" }
+  ): Promise<AdminPerson>;
+  deletePerson(id: string, options?: { force?: boolean }): Promise<AdminPerson>;
+  listPersonDevices(id: string): Promise<Peer[]>;
+  revokePersonDevices(id: string): Promise<{
+    revoked_count: number;
+    already_revoked_count: number;
+    revoked_peer_ids: string[];
+  }>;
 }
 
 export class HttpEngineClient implements EngineClient {
@@ -89,6 +110,122 @@ export class HttpEngineClient implements EngineClient {
   async deletePeer(id: string): Promise<void> {
     const safeId = encodeURIComponent(id);
     await this.requestText([`/api/v1/peers/${safeId}`, `/v1/peers/${safeId}`, `/peers/${safeId}`], { method: "DELETE" });
+  }
+
+  // ── Expiry methods (P3.4) ───────────────────────────────────────────────
+
+  async listExpiring(days?: number): Promise<{
+    expiring_soon: Array<{ peer_id: string; name: string; expires_at: string; days_remaining: number }>;
+    warn_within_days: number;
+    generated_at: string;
+  }> {
+    const qs = typeof days === "number" && Number.isInteger(days) && days >= 0 && days <= 365
+      ? `?days=${days}`
+      : "";
+    return this.requestJson<{
+      expiring_soon: Array<{ peer_id: string; name: string; expires_at: string; days_remaining: number }>;
+      warn_within_days: number;
+      generated_at: string;
+    }>([
+      `/api/v1/expiring${qs}`,
+      `/v1/expiring${qs}`,
+      `/expiring${qs}`
+    ]);
+  }
+
+  // ── Person methods (P3.1) ───────────────────────────────────────────────
+
+  async listPersons(filter?: { status?: "active" | "archived" }): Promise<AdminPerson[]> {
+    const qs = filter?.status ? `?status=${encodeURIComponent(filter.status)}` : "";
+    const body = await this.requestJson<{ persons?: AdminPerson[] } | AdminPerson[]>([
+      `/api/v1/persons${qs}`,
+      `/v1/persons${qs}`,
+      `/persons${qs}`
+    ]);
+    return Array.isArray(body) ? body : body.persons ?? [];
+  }
+
+  async getPerson(id: string): Promise<AdminPerson> {
+    const safeId = encodeURIComponent(id);
+    const body = await this.requestJson<{ person?: AdminPerson } | AdminPerson>([
+      `/api/v1/persons/${safeId}`,
+      `/v1/persons/${safeId}`,
+      `/persons/${safeId}`
+    ]);
+    return unwrapPersonLike<AdminPerson>(body, "display_name");
+  }
+
+  async createPerson(input: { displayName: string; notes?: string }): Promise<AdminPerson> {
+    const body = await this.requestJson<{ person?: AdminPerson } | AdminPerson>([
+      "/api/v1/persons",
+      "/v1/persons",
+      "/persons"
+    ], {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+    return unwrapPersonLike<AdminPerson>(body, "display_name");
+  }
+
+  async updatePerson(
+    id: string,
+    patch: { displayName?: string; notes?: string | null; status?: "active" | "archived" }
+  ): Promise<AdminPerson> {
+    const safeId = encodeURIComponent(id);
+    // Translate camelCase client input to engine wire format (snake_case).
+    const wire: Record<string, unknown> = {};
+    if (patch.displayName !== undefined) wire.display_name = patch.displayName;
+    if (patch.notes !== undefined) wire.notes = patch.notes;
+    if (patch.status !== undefined) wire.status = patch.status;
+    const body = await this.requestJson<{ person?: AdminPerson } | AdminPerson>([
+      `/api/v1/persons/${safeId}`,
+      `/v1/persons/${safeId}`,
+      `/persons/${safeId}`
+    ], {
+      method: "PATCH",
+      body: JSON.stringify(wire)
+    });
+    return unwrapPersonLike<AdminPerson>(body, "display_name");
+  }
+
+  async deletePerson(id: string, options?: { force?: boolean }): Promise<AdminPerson> {
+    const safeId = encodeURIComponent(id);
+    const body = await this.requestJson<{ person?: AdminPerson } | AdminPerson>([
+      `/api/v1/persons/${safeId}`,
+      `/v1/persons/${safeId}`,
+      `/persons/${safeId}`
+    ], {
+      method: "DELETE",
+      body: JSON.stringify(options?.force === true ? { force: true } : {})
+    });
+    return unwrapPersonLike<AdminPerson>(body, "display_name");
+  }
+
+  async listPersonDevices(id: string): Promise<Peer[]> {
+    const safeId = encodeURIComponent(id);
+    const body = await this.requestJson<{ devices?: Peer[] } | Peer[]>([
+      `/api/v1/persons/${safeId}/devices`,
+      `/v1/persons/${safeId}/devices`,
+      `/persons/${safeId}/devices`
+    ]);
+    return Array.isArray(body) ? body : body.devices ?? [];
+  }
+
+  async revokePersonDevices(id: string): Promise<{
+    revoked_count: number;
+    already_revoked_count: number;
+    revoked_peer_ids: string[];
+  }> {
+    const safeId = encodeURIComponent(id);
+    return this.requestJson<{
+      revoked_count: number;
+      already_revoked_count: number;
+      revoked_peer_ids: string[];
+    }>([
+      `/api/v1/persons/${safeId}/revoke-devices`,
+      `/v1/persons/${safeId}/revoke-devices`,
+      `/persons/${safeId}/revoke-devices`
+    ], { method: "POST" });
   }
 
   private async requestJson<T>(paths: string[], init: RequestInit = {}): Promise<T> {
@@ -181,4 +318,15 @@ function unwrapPeer(body: { peer?: Peer } | Peer): Peer {
 
 function isPeer(value: unknown): value is Peer {
   return Boolean(value && typeof value === "object" && "id" in value && "name" in value);
+}
+
+// Generic unwrapper for /v1/persons responses. The discriminator is the
+// snake_case field unique to persons (`display_name`); the engine wraps in
+// `{ person }` but tests / older clients may pass the raw object.
+function unwrapPersonLike<T>(body: { person?: unknown } | T, discriminator: keyof T): T {
+  const wrapped = body as { person?: unknown };
+  if (wrapped.person && typeof wrapped.person === "object" && discriminator in (wrapped.person as object)) {
+    return wrapped.person as T;
+  }
+  return body as T;
 }

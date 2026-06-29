@@ -4,8 +4,18 @@ import cookieParser from "cookie-parser";
 import QRCode from "qrcode";
 import type { AdminConfig } from "./config";
 import { HttpEngineClient, type EngineClient } from "./engine-client";
-import { dashboardPage, loginPage, newPeerPage, peerDetailPage } from "./html";
-import type { PeerCreateInput } from "./types";
+import {
+  dashboardPage,
+  loginPage,
+  newPeerPage,
+  peerDetailPage,
+  renderExpiryBanner,
+  renderPeopleList,
+  renderPersonDetail,
+  renderPersonEdit,
+  renderPersonNew
+} from "./html";
+import type { AdminPerson, PeerCreateInput } from "./types";
 
 const SESSION_COOKIE = "kintunnel_admin";
 const SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000;
@@ -82,8 +92,21 @@ export function createApp({ config, engine = new HttpEngineClient(config.engineU
 
   app.get("/", async (req, res) => {
     try {
-      const [status, peers, events] = await Promise.all([engine.status(), engine.listPeers(), engine.listEvents(8)]);
-      res.send(dashboardPage(status, peers, events, { csrfToken: csrfTokenForRequest(req, config.adminToken) }));
+      const [status, peers, events] = await Promise.all([
+        engine.status(),
+        engine.listPeers(),
+        engine.listEvents(8)
+      ]);
+      // NEW (P3.4) — fetch expiring peers for the banner. Failure here must
+      // NOT break the dashboard; we fall back to an empty list and the
+      // banner renderer is a no-op.
+      const expiring = await safeListExpiring(engine);
+      res.send(
+        dashboardPage(status, peers, events, {
+          csrfToken: csrfTokenForRequest(req, config.adminToken),
+          expiryBanner: renderExpiryBanner(expiring.expiring_soon, expiring.warn_within_days)
+        })
+      );
     } catch (error) {
       res.status(502).send(dashboardPage({ ready: false, message: publicError(error) }, [], [], {
         csrfToken: csrfTokenForRequest(req, config.adminToken),
@@ -92,17 +115,27 @@ export function createApp({ config, engine = new HttpEngineClient(config.engineU
     }
   });
 
-  app.get("/peers/new", (req, res) => {
-    res.send(newPeerPage({ csrfToken: csrfTokenForRequest(req, config.adminToken) }));
+  app.get("/peers/new", async (req, res) => {
+    try {
+      const people = await safeListPersons(engine, "active");
+      res.send(newPeerPage({ csrfToken: csrfTokenForRequest(req, config.adminToken) }, people));
+    } catch (error) {
+      res.status(502).send(newPeerPage({
+        csrfToken: csrfTokenForRequest(req, config.adminToken),
+        error: publicError(error)
+      }));
+    }
   });
 
   app.post("/peers", requireCsrf, async (req, res) => {
     const input = parsePeerCreate(req.body);
     if (!input.name) {
+      let people: AdminPerson[] = [];
+      try { people = await safeListPersons(engine, "active"); } catch { /* fall through with [] */ }
       res.status(400).send(newPeerPage({
         csrfToken: csrfTokenForRequest(req, config.adminToken),
         error: "Peer name is required."
-      }));
+      }, people));
       return;
     }
 
@@ -110,10 +143,12 @@ export function createApp({ config, engine = new HttpEngineClient(config.engineU
       const peer = await engine.createPeer(input);
       res.redirect(`/peers/${encodeURIComponent(peer.id)}`);
     } catch (error) {
+      let people: AdminPerson[] = [];
+      try { people = await safeListPersons(engine, "active"); } catch { /* fall through */ }
       res.status(502).send(newPeerPage({
         csrfToken: csrfTokenForRequest(req, config.adminToken),
         error: publicError(error)
-      }));
+      }, people));
     }
   });
 
@@ -176,6 +211,171 @@ export function createApp({ config, engine = new HttpEngineClient(config.engineU
     try {
       await engine.deletePeer(req.params.id);
       res.redirect("/");
+    } catch (error) {
+      res.status(502).send(dashboardPage({ ready: false }, [], [], {
+        csrfToken: csrfTokenForRequest(req, config.adminToken),
+        error: publicError(error)
+      }));
+    }
+  });
+
+  // ── People routes (P3.1) ──────────────────────────────────────────────────
+
+  app.get("/people", async (req, res) => {
+    const status = typeof req.query.status === "string" && (req.query.status === "active" || req.query.status === "archived")
+      ? req.query.status
+      : "active";
+    try {
+      const people = await engine.listPersons({ status });
+      res.send(renderPeopleList(people, { status }, { csrfToken: csrfTokenForRequest(req, config.adminToken) }));
+    } catch (error) {
+      res.status(502).send(dashboardPage({ ready: false }, [], [], {
+        csrfToken: csrfTokenForRequest(req, config.adminToken),
+        error: publicError(error)
+      }));
+    }
+  });
+
+  app.get("/people/new", (req, res) => {
+    res.send(renderPersonNew({ csrfToken: csrfTokenForRequest(req, config.adminToken) }));
+  });
+
+  app.post("/people/new", requireCsrf, async (req, res) => {
+    const displayName = field(req.body.display_name);
+    if (!displayName) {
+      res.status(400).send(renderPersonNew({
+        csrfToken: csrfTokenForRequest(req, config.adminToken),
+        error: "Display name is required."
+      }));
+      return;
+    }
+    const notes = optionalField(req.body.notes);
+    try {
+      const person = await engine.createPerson({ displayName, notes });
+      res.redirect(`/people/${encodeURIComponent(person.id)}`);
+    } catch (error) {
+      res.status(502).send(renderPersonNew({
+        csrfToken: csrfTokenForRequest(req, config.adminToken),
+        error: publicError(error)
+      }));
+    }
+  });
+
+  app.get("/people/:id", async (req, res) => {
+    try {
+      const [person, devices] = await Promise.all([
+        engine.getPerson(req.params.id),
+        engine.listPersonDevices(req.params.id)
+      ]);
+      res.send(renderPersonDetail(person, devices, {
+        csrfToken: csrfTokenForRequest(req, config.adminToken)
+      }));
+    } catch (error) {
+      res.status(502).send(dashboardPage({ ready: false }, [], [], {
+        csrfToken: csrfTokenForRequest(req, config.adminToken),
+        error: publicError(error)
+      }));
+    }
+  });
+
+  app.get("/people/:id/edit", async (req, res) => {
+    try {
+      const person = await engine.getPerson(req.params.id);
+      res.send(renderPersonEdit(person, { csrfToken: csrfTokenForRequest(req, config.adminToken) }));
+    } catch (error) {
+      res.status(502).send(dashboardPage({ ready: false }, [], [], {
+        csrfToken: csrfTokenForRequest(req, config.adminToken),
+        error: publicError(error)
+      }));
+    }
+  });
+
+  app.post("/people/:id/edit", requireCsrf, async (req, res) => {
+    const displayName = field(req.body.display_name);
+    const notesRaw = optionalField(req.body.notes);
+    const clearNotes = req.body.clear_notes === "true" || req.body.clear_notes === true;
+    const status = typeof req.body.status === "string" && (req.body.status === "active" || req.body.status === "archived")
+      ? req.body.status
+      : undefined;
+
+    if (!displayName) {
+      try {
+        const person = await engine.getPerson(req.params.id);
+        res.status(400).send(renderPersonEdit(person, {
+          csrfToken: csrfTokenForRequest(req, config.adminToken),
+          error: "Display name is required."
+        }));
+      } catch (error) {
+        res.status(502).send(dashboardPage({ ready: false }, [], [], {
+          csrfToken: csrfTokenForRequest(req, config.adminToken),
+          error: publicError(error)
+        }));
+      }
+      return;
+    }
+
+    try {
+      const patch: { displayName: string; notes?: string | null; status?: "active" | "archived" } = { displayName };
+      if (clearNotes) {
+        patch.notes = null;
+      } else if (notesRaw !== undefined) {
+        patch.notes = notesRaw;
+      }
+      if (status) patch.status = status;
+      await engine.updatePerson(req.params.id, patch);
+      res.redirect(`/people/${encodeURIComponent(req.params.id)}`);
+    } catch (error) {
+      try {
+        const person = await engine.getPerson(req.params.id);
+        res.status(502).send(renderPersonEdit(person, {
+          csrfToken: csrfTokenForRequest(req, config.adminToken),
+          error: publicError(error)
+        }));
+      } catch (fallbackError) {
+        res.status(502).send(dashboardPage({ ready: false }, [], [], {
+          csrfToken: csrfTokenForRequest(req, config.adminToken),
+          error: publicError(fallbackError)
+        }));
+      }
+    }
+  });
+
+  app.post("/people/:id/delete", requireCsrf, async (req, res) => {
+    const force = req.body.force === "true" || req.body.force === true;
+    try {
+      await engine.deletePerson(req.params.id, { force });
+      res.redirect("/people");
+    } catch (error) {
+      try {
+        const [person, devices] = await Promise.all([
+          engine.getPerson(req.params.id),
+          engine.listPersonDevices(req.params.id)
+        ]);
+        res.status(502).send(renderPersonDetail(person, devices, {
+          csrfToken: csrfTokenForRequest(req, config.adminToken),
+          error: publicError(error)
+        }));
+      } catch (fallbackError) {
+        res.status(502).send(dashboardPage({ ready: false }, [], [], {
+          csrfToken: csrfTokenForRequest(req, config.adminToken),
+          error: publicError(fallbackError)
+        }));
+      }
+    }
+  });
+
+  app.post("/people/:id/revoke-devices", requireCsrf, async (req, res) => {
+    try {
+      const result = await engine.revokePersonDevices(req.params.id);
+      const message = `Revoked ${result.revoked_count} device(s); ${result.already_revoked_count} already revoked.`;
+      const [person, devices] = await Promise.all([
+        engine.getPerson(req.params.id),
+        engine.listPersonDevices(req.params.id)
+      ]);
+      res.send(renderPersonDetail(person, devices, {
+        csrfToken: csrfTokenForRequest(req, config.adminToken),
+        notice: message
+      }));
     } catch (error) {
       res.status(502).send(dashboardPage({ ready: false }, [], [], {
         csrfToken: csrfTokenForRequest(req, config.adminToken),
@@ -300,25 +500,50 @@ function safeEqual(left: string, right: string): boolean {
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function parsePeerCreate(body: Record<string, unknown>): PeerCreateInput {
+function parsePeerCreate(body: Record<string, unknown>): PeerCreateInput & { person_id?: string; device_label?: string } {
   const generateKeys = body.generate_keys === undefined ? undefined : body.generate_keys === "true" || body.generate_keys === true;
-  const input: PeerCreateInput = {
+  const input: PeerCreateInput & { person_id?: string; device_label?: string } = {
     name: field(body.name),
     public_key: optionalField(body.public_key),
     generate_keys: generateKeys,
     allowed_ips: csv(body.allowed_ips),
     dns_servers: csv(body.dns_servers),
-    expires_at: optionalField(body.expires_at)
+    expires_at: optionalField(body.expires_at),
+    person_id: optionalField(body.person_id),
+    device_label: optionalField(body.device_label)
   };
 
   Object.keys(input).forEach((key) => {
-    const value = input[key as keyof PeerCreateInput];
+    const value = input[key as keyof typeof input];
     if (value === undefined || (Array.isArray(value) && value.length === 0)) {
-      delete input[key as keyof PeerCreateInput];
+      delete input[key as keyof typeof input];
     }
   });
 
   return input;
+}
+
+async function safeListPersons(engine: EngineClient, status: "active" | "archived"): Promise<AdminPerson[]> {
+  try {
+    return await engine.listPersons({ status });
+  } catch {
+    return [];
+  }
+}
+
+// NEW (P3.4) — best-effort fetch of the expiry banner payload. The banner
+// must render even when the engine is down or the endpoint is unavailable
+// (e.g. an older engine version that predates P3.4).
+async function safeListExpiring(engine: EngineClient): Promise<{
+  expiring_soon: Array<{ peer_id: string; name: string; expires_at: string; days_remaining: number }>;
+  warn_within_days: number;
+  generated_at: string;
+}> {
+  try {
+    return await engine.listExpiring();
+  } catch {
+    return { expiring_soon: [], warn_within_days: 0, generated_at: new Date().toISOString() };
+  }
 }
 
 function field(value: unknown): string {

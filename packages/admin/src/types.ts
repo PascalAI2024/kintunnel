@@ -43,6 +43,19 @@ export interface Peer {
   last_handshake_at?: string | null;
   transfer_rx_bytes?: number;
   transfer_tx_bytes?: number;
+  // P3.1 — links a peer to a Person + a human-readable device label.
+  person_id?: string;
+  device_label?: string;
+  [key: string]: unknown;
+}
+
+export interface AdminPerson {
+  id: string;
+  display_name: string;
+  notes?: string;
+  status: "active" | "archived";
+  created_at: string;
+  updated_at: string;
   [key: string]: unknown;
 }
 

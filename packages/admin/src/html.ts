@@ -1,4 +1,4 @@
-import type { AuditEvent, EngineStatus, Peer } from "./types";
+import type { AdminPerson, AuditEvent, EngineStatus, Peer } from "./types";
 
 export interface LayoutOptions {
   title: string;
@@ -13,6 +13,10 @@ export interface PageOptions {
   csrfToken?: string;
   error?: string;
   notice?: string;
+  // NEW (P3.4) — pre-rendered expiry banner HTML. Injected above the
+  // dashboard cards so operators see pending expirations before anything
+  // else. Empty string hides the banner.
+  expiryBanner?: string;
 }
 
 export function layout(options: LayoutOptions): string {
@@ -71,7 +75,7 @@ export function layout(options: LayoutOptions): string {
     <nav>
       <a href="/">KinTunnel Admin</a>
       <div class="links">
-        ${options.authenticated ? `<a href="/peers/new">Create peer</a><form method="post" action="/logout">${csrfField(options.csrfToken)}<button class="secondary" type="submit">Logout</button></form>` : ""}
+        ${options.authenticated ? `<a href="/">Dashboard</a><a href="/people">People</a><a href="/peers/new">Create peer</a><form method="post" action="/logout">${csrfField(options.csrfToken)}<button class="secondary" type="submit">Logout</button></form>` : ""}
       </div>
     </nav>
   </header>
@@ -105,6 +109,7 @@ export function dashboardPage(status: EngineStatus, peers: Peer[], events: Audit
     notice: options.notice,
     error: options.error,
     content: `<h1>Dashboard</h1>
+      ${options.expiryBanner ?? ""}
       ${statusCards(status)}
       <div class="actions"><a class="button" href="/peers/new">Create peer</a></div>
       <div class="split">
@@ -120,7 +125,42 @@ export function dashboardPage(status: EngineStatus, peers: Peer[], events: Audit
   });
 }
 
-export function newPeerPage(options: PageOptions = {}): string {
+// NEW (P3.4) — banner shown when one or more peers are within `warnDays`
+// of their `expiresAt`. Returns an empty string when there's nothing to
+// report so callers can blindly concatenate the result without a guard.
+export function renderExpiryBanner(
+  expiring: Array<{ name: string; days_remaining: number }>,
+  warnDays: number
+): string {
+  if (!Array.isArray(expiring) || expiring.length === 0) return "";
+  const items = expiring
+    .slice(0, 10)
+    .map((entry) => `<li>${escapeHtml(entry.name)} <span class="muted">(${
+      typeof entry.days_remaining === "number"
+        ? formatDaysRemaining(entry.days_remaining)
+        : ""
+    })</span></li>`)
+    .join("");
+  const overflow = expiring.length > 10 ? `<li class="muted">…and ${expiring.length - 10} more.</li>` : "";
+  return `<div class="flash" style="border-color: #f2b8b5; background: #fff8ec; color: #b54708;">
+    <strong>⚠ ${escapeHtml(String(expiring.length))} peer${expiring.length === 1 ? "" : "s"} expiring within ${escapeHtml(String(warnDays))} day${warnDays === 1 ? "" : "s"}</strong>
+    <ul style="margin: 8px 0 0 18px; padding: 0;">${items}${overflow}</ul>
+  </div>`;
+}
+
+function formatDaysRemaining(days: number): string {
+  if (days < 0) {
+    const overdue = Math.abs(days);
+    return `${overdue.toFixed(1)} day${overdue === 1 ? "" : "s"} overdue`;
+  }
+  if (days < 1) {
+    const hours = Math.max(0, Math.round(days * 24));
+    return `${hours}h remaining`;
+  }
+  return `${days.toFixed(1)} day${days === 1 ? "" : "s"} remaining`;
+}
+
+export function newPeerPage(options: PageOptions = {}, people: AdminPerson[] = []): string {
   return layout({
     title: "Create peer",
     authenticated: true,
@@ -141,9 +181,23 @@ export function newPeerPage(options: PageOptions = {}): string {
         <input id="dns_servers" name="dns_servers" placeholder="1.1.1.1, 9.9.9.9">
         <label for="expires_at">Expires at</label>
         <input id="expires_at" name="expires_at" type="datetime-local">
+        <label for="person_id">Person</label>
+        ${personSelect(people)}
+        <label for="device_label">Device label</label>
+        <input id="device_label" name="device_label" placeholder="alice-iphone" maxlength="40">
         <div class="actions"><button type="submit">Create peer</button><a class="button secondary" href="/">Cancel</a></div>
       </form>`
   });
+}
+
+function personSelect(people: AdminPerson[]): string {
+  if (people.length === 0) {
+    return `<select id="person_id" name="person_id" disabled><option>(create a person first)</option></select>`;
+  }
+  const options = [`<option value="">Unassigned</option>`].concat(
+    people.map((person) => `<option value="${escapeAttribute(person.id)}">${escapeHtml(person.display_name)}</option>`)
+  );
+  return `<select id="person_id" name="person_id">${options.join("")}</select>`;
 }
 
 export function peerDetailPage(peer: Peer, options: PageOptions = {}): string {
@@ -173,6 +227,144 @@ export function peerDetailPage(peer: Peer, options: PageOptions = {}): string {
         <form method="post" action="/peers/${escapeAttribute(peer.id)}/delete">${csrfField(options.csrfToken)}<button class="danger" type="submit">Delete</button></form>
         <a class="button secondary" href="/">Back</a>
       </div>`
+  });
+}
+
+export function renderPeopleList(people: AdminPerson[], filters: { status: string }, options: PageOptions = {}): string {
+  const active = people.filter((person) => person.status === "active");
+  const archived = people.filter((person) => person.status === "archived");
+  const showArchived = filters.status === "archived";
+  const visible = showArchived ? archived : active;
+  const tabs = `
+    <div class="actions" style="margin-top:0">
+      <a class="button ${showArchived ? "secondary" : ""}" href="/people?status=active">Active (${active.length})</a>
+      <a class="button ${showArchived ? "" : "secondary"}" href="/people?status=archived">Archived (${archived.length})</a>
+      <a class="button" href="/people/new">New person</a>
+    </div>`;
+
+  const table = visible.length === 0
+    ? `<p class="muted">No ${showArchived ? "archived" : "active"} people.</p>`
+    : `<table>
+        <thead><tr><th>Name</th><th>Status</th><th>Devices</th><th>Notes</th><th>Created</th></tr></thead>
+        <tbody>
+          ${visible.map((person) => `<tr>
+            <td><a href="/people/${escapeAttribute(person.id)}">${escapeHtml(person.display_name)}</a></td>
+            <td>${statusPill(person.status)}</td>
+            <td class="muted">—</td>
+            <td class="muted">${escapeHtml(person.notes ?? "")}</td>
+            <td class="muted">${escapeHtml(formatDate(person.created_at))}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>`;
+
+  return layout({
+    title: "People",
+    authenticated: true,
+    csrfToken: options.csrfToken,
+    error: options.error,
+    notice: options.notice,
+    content: `<h1>People</h1>${tabs}<div style="margin-top:18px">${table}</div>`
+  });
+}
+
+export function renderPersonNew(options: PageOptions = {}): string {
+  return layout({
+    title: "New person",
+    authenticated: true,
+    csrfToken: options.csrfToken,
+    error: options.error,
+    notice: options.notice,
+    content: `<h1>New person</h1>
+      <form method="post" action="/people/new" class="panel">
+        ${csrfField(options.csrfToken)}
+        <label for="display_name">Display name</label>
+        <input id="display_name" name="display_name" placeholder="Alice Kim" required maxlength="120">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" placeholder="Optional operator notes" maxlength="2000"></textarea>
+        <div class="actions"><button type="submit">Create person</button><a class="button secondary" href="/people">Cancel</a></div>
+      </form>`
+  });
+}
+
+export function renderPersonDetail(person: AdminPerson, devices: Peer[], options: PageOptions = {}): string {
+  const activeDevices = devices.filter((device) => device.status === "active");
+  const archivedDevices = devices.filter((device) => device.status !== "active");
+
+  const deviceTable = (rows: Peer[], emptyLabel: string): string => {
+    if (rows.length === 0) {
+      return `<p class="muted">${emptyLabel}</p>`;
+    }
+    return `<table>
+      <thead><tr><th>Device</th><th>Status</th><th>Address</th><th>Label</th><th>Handshake</th></tr></thead>
+      <tbody>
+        ${rows.map((device) => `<tr>
+          <td><a href="/peers/${escapeAttribute(device.id)}">${escapeHtml(device.name)}</a></td>
+          <td>${statusPill(device.status ?? "unknown")}</td>
+          <td class="muted">${escapeHtml(device.address_v4 ?? device.address_v6 ?? "")}</td>
+          <td class="muted">${escapeHtml(device.device_label ?? "")}</td>
+          <td class="muted">${escapeHtml(device.last_handshake_at ?? "never")}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+  };
+
+  return layout({
+    title: person.display_name,
+    authenticated: true,
+    csrfToken: options.csrfToken,
+    error: options.error,
+    notice: options.notice,
+    content: `<h1>${escapeHtml(person.display_name)}</h1>
+      <div class="grid">
+        <section class="card">
+          <h2>Details</h2>
+          <p><strong>Status:</strong> <span class="status-pill">${escapeHtml(person.status)}</span></p>
+          <p><strong>Created:</strong> ${escapeHtml(formatDate(person.created_at))}</p>
+          <p><strong>Updated:</strong> ${escapeHtml(formatDate(person.updated_at))}</p>
+          <p><strong>Notes:</strong><br>${escapeHtml(person.notes ?? "—")}</p>
+        </section>
+        <section class="card">
+          <h2>Active devices (${activeDevices.length})</h2>
+          ${deviceTable(activeDevices, "No active devices.")}
+        </section>
+      </div>
+      <h2>Other devices (${archivedDevices.length})</h2>
+      ${deviceTable(archivedDevices, "No revoked or disabled devices.")}
+      <h2>Actions</h2>
+      <div class="actions">
+        <a class="button secondary" href="/people/${escapeAttribute(person.id)}/edit">Edit</a>
+        ${devices.length > 0 ? `<form method="post" action="/people/${escapeAttribute(person.id)}/revoke-devices">${csrfField(options.csrfToken)}<button class="danger" type="submit">Revoke all devices</button></form>` : ""}
+        <form method="post" action="/people/${escapeAttribute(person.id)}/delete" onsubmit="return confirm('Archive ${escapeAttribute(person.id)}? Active devices will block this action.');">${csrfField(options.csrfToken)}<button class="danger" type="submit">Archive person</button></form>
+        <a class="button secondary" href="/people">Back</a>
+      </div>`
+  });
+}
+
+export function renderPersonEdit(person: AdminPerson, options: PageOptions = {}): string {
+  return layout({
+    title: `Edit ${person.display_name}`,
+    authenticated: true,
+    csrfToken: options.csrfToken,
+    error: options.error,
+    notice: options.notice,
+    content: `<h1>Edit ${escapeHtml(person.display_name)}</h1>
+      <form method="post" action="/people/${escapeAttribute(person.id)}/edit" class="panel">
+        ${csrfField(options.csrfToken)}
+        <label for="display_name">Display name</label>
+        <input id="display_name" name="display_name" required maxlength="120" value="${escapeAttribute(person.display_name)}">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" maxlength="2000">${escapeHtml(person.notes ?? "")}</textarea>
+        <label>
+          <input type="checkbox" name="clear_notes" value="true" style="width:auto">
+          Clear notes
+        </label>
+        <label for="status">Status</label>
+        <select id="status" name="status">
+          <option value="active"${person.status === "active" ? " selected" : ""}>active</option>
+          <option value="archived"${person.status === "archived" ? " selected" : ""}>archived</option>
+        </select>
+        <div class="actions"><button type="submit">Save</button><a class="button secondary" href="/people/${escapeAttribute(person.id)}">Cancel</a></div>
+      </form>`
   });
 }
 
