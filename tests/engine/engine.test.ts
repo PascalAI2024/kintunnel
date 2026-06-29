@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Server } from "node:http";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../packages/engine/src/app.js";
 import { loadConfig } from "../../packages/engine/src/env.js";
 import { StateStore } from "../../packages/engine/src/state.js";
@@ -75,6 +75,76 @@ describe("KinTunnel engine MVP", () => {
     expect(body.ok).toBe(true);
     expect(body).not.toHaveProperty("data_dir");
     expect(body).not.toHaveProperty("state_path");
+  });
+
+  it("exposes checks: HealthCheck[] on /health", async () => {
+    const response = await fetch(`${baseUrl}/health`);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(Array.isArray(body.checks)).toBe(true);
+    expect(body.checks.length).toBeGreaterThanOrEqual(1);
+    for (const check of body.checks) {
+      expect(check).toHaveProperty("name");
+      expect(check).toHaveProperty("status");
+      expect(check).toHaveProperty("required");
+    }
+  });
+
+  it("returns 503 from /health when a required check fails", async () => {
+    // The /health endpoint in app.ts delegates to runHealthChecks() and
+    // uses its `ok` flag to decide the status code (200 vs 503). We swap
+    // the module export to a synthetic report with `ok: false` and a
+    // failing required check so we exercise the 503 branch end-to-end
+    // without depending on real /dev/net/tun state on the test host.
+    const healthModule = await import("../../packages/engine/src/health.js");
+    const originalRunHealthChecks = healthModule.runHealthChecks;
+    const spy = vi.spyOn(healthModule, "runHealthChecks").mockResolvedValue({
+      ok: false,
+      service: "kintunnel-engine",
+      dry_run: false,
+      env: "test",
+      messages: [],
+      checked_at: new Date().toISOString(),
+      required_failing: ["tun"],
+      warnings: [],
+      checks: [
+        {
+          name: "tun",
+          status: "fail",
+          detail: "/dev/net/tun is not readable",
+          observed_at: new Date().toISOString(),
+          required: true
+        }
+      ]
+    } as unknown as Awaited<ReturnType<typeof healthModule.runHealthChecks>>);
+
+    try {
+      const response = await fetch(`${baseUrl}/health`);
+      expect(response.status).toBe(503);
+      const body = await response.json();
+      expect(body.ok).toBe(false);
+      expect(body.required_failing).toContain("tun");
+    } finally {
+      spy.mockRestore();
+      void originalRunHealthChecks;
+    }
+  });
+
+  it("returns { capabilities: Capabilities } shape from /v1/capabilities", async () => {
+    const response = await fetch(`${baseUrl}/v1/capabilities`, { headers: authHeaders() });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.capabilities).toBeDefined();
+    // Spot-check the new Wave 1/2 fields.
+    expect(body.capabilities).toHaveProperty("hasIptables");
+    expect(body.capabilities).toHaveProperty("hasIpset");
+    expect(body.capabilities).toHaveProperty("hasWg");
+    expect(body.capabilities).toHaveProperty("hasWgQuick");
+    expect(body.capabilities).toHaveProperty("hasTun");
+    expect(body.capabilities).toHaveProperty("interfaceName");
+    // dryRun defaults to true in this test config.
+    expect(body.capabilities.dryRun).toBe(true);
   });
 
   it("creates peers and allocates deterministic tunnel addresses", async () => {

@@ -18,10 +18,14 @@ WORKDIR /app
 ENV NODE_ENV=production \
     KINTUNNEL_ENV=production \
     KINTUNNEL_ENGINE_PORT=9090 \
-    KINTUNNEL_DATA_DIR=/var/lib/kintunnel
+    KINTUNNEL_DATA_DIR=/var/lib/kintunnel \
+    KINTUNNEL_BACKUP_DIR=/backups \
+    KINTUNNEL_BACKUP_RETENTION_COUNT=7 \
+    KINTUNNEL_BACKUP_LOCK_TIMEOUT_MS=5000 \
+    KINTUNNEL_NAT_APPLY=true
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libc-bin libc6 libcap2 libsystemd0 libudev1 curl iproute2 iptables wireguard-tools \
+    && apt-get install -y --no-install-recommends libc-bin libc6 libcap2 libsystemd0 libudev1 curl iproute2 iptables wireguard-tools flock uuid-runtime ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./

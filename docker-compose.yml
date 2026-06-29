@@ -35,11 +35,16 @@ services:
     read_only: true
     cap_drop:
       - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
     security_opt:
       - no-new-privileges:true
     tmpfs:
       - /tmp
       - /run
+    devices:
+      - /dev/net/tun:/dev/net/tun
     environment:
       KINTUNNEL_ENV: ${KINTUNNEL_ENV:-production}
       KINTUNNEL_DRY_RUN: ${KINTUNNEL_DRY_RUN:-true}
@@ -57,6 +62,10 @@ services:
       KINTUNNEL_DATA_DIR: /var/lib/kintunnel
       KINTUNNEL_CONFIG_FILE: /etc/kintunnel/kintunnel.yml
       TZ: ${TZ:-UTC}
+      KINTUNNEL_BACKUP_DIR: /backups
+      KINTUNNEL_BACKUP_RETENTION_COUNT: 7
+      KINTUNNEL_BACKUP_LOCK_TIMEOUT_MS: 5000
+      KINTUNNEL_NAT_APPLY: "true"
     volumes:
       - ./config:/etc/kintunnel:ro
       - kintunnel-data:/var/lib/kintunnel

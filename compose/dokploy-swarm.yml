@@ -43,6 +43,7 @@ services:
         mode: host
     cap_add:
       - NET_ADMIN
+      - NET_RAW
     cap_drop:
       - ALL
     read_only: true

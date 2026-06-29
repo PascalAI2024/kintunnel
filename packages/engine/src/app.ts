@@ -1,11 +1,15 @@
 import crypto from "node:crypto";
 import express, { type ErrorRequestHandler, type Request, type Response } from "express";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { BackupError, createBackupStorage } from "./backup.js";
 import { renderClientConfig } from "./config-render.js";
 import { assertStrongEngineApiToken } from "./env.js";
+import { runHealthChecks } from "./health.js";
 import { isPeerActive, peerApiStatus } from "./peers.js";
 import { getCapabilities, getRuntimeState, reconcile } from "./runtime.js";
 import { StateStore, ValidationError } from "./state.js";
-import type { AuditEvent, EngineConfig, PeerRecord, ServerSettings } from "./types.js";
+import type { AuditEvent, BackupManifest, EngineConfig, PeerRecord, ServerSettings } from "./types.js";
 
 export function createApp(config: EngineConfig) {
   assertStrongEngineApiToken(config.apiToken, config.env);
@@ -13,6 +17,7 @@ export function createApp(config: EngineConfig) {
   const app = express();
   const api = express.Router();
   const store = new StateStore(config);
+  const backups = createBackupStorage(config, store);
 
   app.disable("x-powered-by");
   app.use(express.json({ limit: "64kb" }));
@@ -20,11 +25,17 @@ export function createApp(config: EngineConfig) {
   app.get("/health", async (_req, res, next) => {
     try {
       const capabilities = await getCapabilities(config);
-      res.json({
-        ok: config.dryRun || capabilities.hasWg,
+      const state = await store.load();
+      const report = await runHealthChecks(config, state);
+      const ok = report.ok && (config.dryRun || capabilities.hasWg);
+      res.status(ok ? 200 : 503).json({
+        ok,
         service: "kintunnel-engine",
         dry_run: config.dryRun,
-        messages: capabilities.messages
+        messages: capabilities.messages,
+        checks: report.checks,
+        required_failing: report.required_failing,
+        warnings: report.warnings
       });
     } catch (error) {
       next(error);
@@ -39,6 +50,15 @@ export function createApp(config: EngineConfig) {
       service: "kintunnel-engine",
       dry_run: config.dryRun
     });
+  });
+
+  api.get("/capabilities", async (_req, res, next) => {
+    try {
+      const capabilities = await getCapabilities(config);
+      res.json({ capabilities });
+    } catch (error) {
+      next(error);
+    }
   });
 
   api.get("/status", async (_req, res, next) => {
@@ -188,6 +208,113 @@ export function createApp(config: EngineConfig) {
     }
   });
 
+  api.post("/backups", async (req, res, next) => {
+    try {
+      const body = (req.body ?? {}) as { trigger?: string; actor?: string };
+      const allowedTriggers = ["manual", "post-restore", "scheduled", "pre-rotate"] as const;
+      type AllowedTrigger = (typeof allowedTriggers)[number];
+      const trigger: AllowedTrigger = allowedTriggers.includes(body.trigger as AllowedTrigger)
+        ? (body.trigger as AllowedTrigger)
+        : "manual";
+      const actor = typeof body.actor === "string" && body.actor.trim().length > 0 ? body.actor.trim() : "engine";
+      const summary = await backups.backupCreate({ trigger, actor });
+      res.status(201).json({ snapshot: summary });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.get("/backups", async (_req, res, next) => {
+    try {
+      const snapshots = await backups.backupList();
+      res.json({ snapshots });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.get("/backups/:id", async (req, res, next) => {
+    try {
+      const manifestPath = path.join(config.backupDir, `snap-${req.params.id}`, "manifest.json");
+      let raw: string;
+      try {
+        raw = await fs.readFile(manifestPath, "utf8");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          throw new BackupError("snapshot_not_found", `Snapshot not found: ${req.params.id}`);
+        }
+        throw new BackupError("io_error", (error as Error).message);
+      }
+      const manifest = JSON.parse(raw) as BackupManifest;
+      res.json({ snapshot: manifest });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.post("/backups/restore-plan", async (req, res, next) => {
+    try {
+      const body = (req.body ?? {}) as { snapshot_id?: string };
+      if (typeof body.snapshot_id !== "string" || body.snapshot_id.length === 0) {
+        throw new ValidationError("Request validation failed.", { snapshot_id: ["is required"] });
+      }
+      const plan = await backups.backupRestorePlan(body.snapshot_id);
+      res.json({ plan });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.post("/backups/:id/restore", async (req, res, next) => {
+    try {
+      const body = (req.body ?? {}) as { apply?: boolean; force?: boolean };
+      if (typeof body.apply !== "boolean") {
+        throw new ValidationError("Request validation failed.", { apply: ["is required (boolean)"] });
+      }
+      const actor = typeof (req.body as { actor?: string })?.actor === "string"
+        ? (req.body as { actor: string }).actor
+        : "engine";
+      const result = await backups.backupRestore(
+        {
+          snapshot_id: req.params.id,
+          apply: body.apply,
+          force: body.force
+        },
+        actor
+      );
+      res.json({
+        restored: true,
+        safety_snapshot_id: result.safetySnapshotId,
+        from_revision: result.fromRevision,
+        applied: result.applied
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.get("/backups/:id/export", async (req, res, next) => {
+    try {
+      const exportResult = await backups.backupExport(req.params.id);
+      res.setHeader("Content-Type", exportResult.contentType);
+      res.setHeader("Content-Length", String(exportResult.sizeBytes));
+      res.setHeader("Content-Disposition", `attachment; filename="kintunnel-snapshot-${req.params.id}.json"`);
+      res.setHeader("X-Backup-Size", String(exportResult.sizeBytes));
+      exportResult.stream.pipe(res);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.delete("/backups/:id", async (req, res, next) => {
+    try {
+      const result = await backups.backupDelete(req.params.id);
+      res.json({ deleted: { snapshot_id: result.snapshotId, size_bytes: result.sizeBytes } });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.use("/v1", api);
   app.use("/api/v1", api);
 
@@ -198,6 +325,17 @@ export function createApp(config: EngineConfig) {
           code: error.message.includes("not found") ? "not_found" : "validation_failed",
           message: error.message,
           fields: error.fields
+        }
+      });
+      return;
+    }
+
+    if (error instanceof BackupError) {
+      const status = backupErrorStatus(error);
+      res.status(status).json({
+        error: {
+          code: error.code,
+          message: error.message
         }
       });
       return;
@@ -278,4 +416,21 @@ function setSensitiveHeaders(res: Response) {
 function sanitizeServer(server: ServerSettings) {
   const { serverPrivateKey: _serverPrivateKey, ...safeServer } = server;
   return safeServer;
+}
+
+function backupErrorStatus(error: BackupError): number {
+  switch (error.code) {
+    case "snapshot_not_found":
+      return 404;
+    case "checksum_mismatch":
+    case "import_invalid":
+      return 422;
+    case "refused_recent":
+      return 409;
+    case "lock_timeout":
+      return 503;
+    case "io_error":
+    default:
+      return 500;
+  }
 }
