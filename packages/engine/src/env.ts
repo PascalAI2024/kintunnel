@@ -128,6 +128,10 @@ export type ResolvedEngineConfig = EngineConfig & {
   auditLogDir: string;
   auditLogMaxBytes: number;
   auditLogRetentionCount: number;
+  // NEW (P3.4) — expiry automation knobs. Additive; EngineConfig consumers
+  // that pre-date P3.4 still see the optional audit-store fields.
+  expiryAutoRevoke: boolean;
+  expiryWarnDays: number;
 };
 
 export function loadConfig(overrides: Partial<EngineConfig> = {}): ResolvedEngineConfig {
@@ -137,6 +141,10 @@ export function loadConfig(overrides: Partial<EngineConfig> = {}): ResolvedEngin
     auditLogRetentionCount?: number;
   };
   const env = overrides.env ?? process.env.KINTUNNEL_ENV ?? "production";
+  // NEW (P3.4) — read the expiry automation knobs BEFORE we resolve the rest
+  // so the override chain mirrors the other env-derived fields.
+  const expiryAutoRevoke = boolEnv(process.env.KINTUNNEL_EXPIRY_AUTO_REVOKE, false);
+  const expiryWarnDays = intEnvInRange("KINTUNNEL_EXPIRY_WARN_DAYS", 7, 0, 365);
   const dataDir = overrides.dataDir ?? process.env.KINTUNNEL_DATA_DIR ?? path.resolve(".", "data", "engine");
   const listenPort = overrides.listenPort ?? intEnv("KINTUNNEL_WG_LISTEN_PORT", 51820);
   const dryRun = overrides.dryRun ?? boolEnv(process.env.KINTUNNEL_DRY_RUN, true);
@@ -192,7 +200,9 @@ export function loadConfig(overrides: Partial<EngineConfig> = {}): ResolvedEngin
       intEnvInRange("KINTUNNEL_AUDIT_LOG_ROTATION_BYTES", 10485760, 1024, 1073741824),
     auditLogRetentionCount:
       auditOverrides.auditLogRetentionCount ??
-      intEnvInRange("KINTUNNEL_AUDIT_LOG_RETENTION_COUNT", 5, 1, 100)
+      intEnvInRange("KINTUNNEL_AUDIT_LOG_RETENTION_COUNT", 5, 1, 100),
+    expiryAutoRevoke,
+    expiryWarnDays
   };
 }
 

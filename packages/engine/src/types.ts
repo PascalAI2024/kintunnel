@@ -27,7 +27,15 @@ export type AuditAction =
   | "backup.restore.failed"
   | "backup.exported"
   | "backup.imported"
-  | "backup.deleted";
+  | "backup.deleted"
+  // P3.1 person/device family-scale data model:
+  | "person.created"
+  | "person.updated"
+  | "person.archived"
+  | "person.deleted"
+  | "person.device.added"
+  | "person.device.removed"
+  | "person.devices.revoked";
 
 export interface ServerSettings {
   interfaceName: string;
@@ -62,15 +70,37 @@ export interface PeerRecord {
   updatedAt: string;
   revokedAt?: string;
   deletedAt?: string;
+  // NEW (P3.1) — links a peer to a Person and a human-readable device label.
+  // Both fields are optional; existing peers continue to work unassigned.
+  personId?: string;
+  deviceLabel?: string;
 }
 
 export type ApiPeerStatus = PeerStatus | "expired";
+
+// ── Person types (P3.1) ─────────────────────────────────────────────────────
+// A Person is a human member of the trusted group. Soft-deleted via
+// status="archived"; cannot have new devices created while archived.
+export type PersonStatus = "active" | "archived";
+
+export interface PersonRecord {
+  id: string;                  // UUID v4 (crypto.randomUUID())
+  displayName: string;         // 1-120 chars; same pattern as PeerRecord.name
+  notes?: string;              // 0-2000 chars; no control chars
+  status: PersonStatus;        // active or archived (soft-deleted)
+  createdAt: string;           // ISO 8601 UTC
+  updatedAt: string;           // ISO 8601 UTC
+}
 
 export interface EngineState {
   version: 1;
   revision: number;
   server: ServerSettings;
   peers: PeerRecord[];
+  // NEW (P3.1) — persons registered for family/group membership. Empty
+  // until persons are created; persisted across upgrades via migration
+  // in StateStore.load().
+  persons: PersonRecord[];
   events?: AuditEvent[];
   lastReconcile?: ReconcileResult;
 }
