@@ -22,8 +22,10 @@ nav:
       - Full Tunnel: configuration/full-tunnel.md
       - Split Tunnel: configuration/split-tunnel.md
   - Operations:
+      - Runbook: operations.md
       - Backups: operations/backups.md
   - Security:
+      - Privilege Model: security.md
       - Security Model: security/security-model.md
   - Troubleshooting:
       - Overview: troubleshooting/index.md

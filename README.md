@@ -35,9 +35,16 @@ KinTunnel has a runnable TypeScript MVP.
 | Docker | Engine and admin Dockerfiles, Compose model, minimal VPS overlay, and Dokploy/Swarm reference. |
 | Tests | Unit and process-level integration coverage for the dry-run runtime. |
 | Safe default | `KINTUNNEL_DRY_RUN=true`, which validates state and renders configs without changing host networking. |
-| Not finished | Production-grade host networking apply, NAT/firewall management, rollback, and live VPS validation. |
+| Backup + restore | Atomic snapshots under `/backups/`, sha256 integrity, retention pruner, safety snapshot before restore, `POST /v1/backups` family of endpoints. |
+| Deep health | 7-check HealthReport (tun, forwarding, interface, nat, iptables, port, state_io), returns 503 when any required check fails. |
+| Apply path | wg syncconf warm sync + ip link cold-start bootstrap + drift detection + rollback. Replaces the prior "intentionally deferred" seam. |
+| NAT + firewall policy | MASQUERADE + FORWARD chain rules via iptables, idempotent `-C` pre-check, comment-marker rollback. |
+| Structured logging | NDJSON logs with KINTUNNEL_LOG_LEVEL filtering. |
+| Prometheus /metrics | Counters + gauges + histograms at `/metrics`. |
+| Persistent audit log | NDJSON with size-based rotation, queryable via `GET /v1/audit?action=&actor=&since=`. |
+| Live VPS validation | Requires a self-hosted CI runner with `/dev/net/tun` access. |
 
-Treat real host networking as experimental until the reconcile path is hardened. The project says that out loud because denial is a poor deployment strategy.
+The dry-run safe default remains. The engine apply path, NAT/firewall policy, backup/restore, and deep health are implemented and unit-tested. The only remaining gap is live VPS validation in CI, which requires a self-hosted runner with `/dev/net/tun` access. See `docs/operations.md` for the manual verification runbook.
 
 ## Quick Start
 
@@ -110,13 +117,48 @@ test -c /dev/net/tun
 sysctl net.ipv4.ip_forward
 ```
 
+## Backup and Restore
+
+Snapshots live under `/backups/` inside the engine container and persist on the `kintunnel-backups` named volume. Every snapshot carries a SHA-256 manifest and a safety snapshot is taken automatically before any restore.
+
+```bash
+# Create a snapshot
+curl -X POST -H "Authorization: Bearer $KINTUNNEL_ENGINE_API_TOKEN" \
+     http://localhost:9090/v1/backups \
+     -H "Content-Type: application/json" -d '{"trigger":"manual"}'
+
+# List snapshots
+curl -H "Authorization: Bearer $KINTUNNEL_ENGINE_API_TOKEN" \
+     http://localhost:9090/v1/backups
+
+# Restore
+curl -X POST -H "Authorization: Bearer $KINTUNNEL_ENGINE_API_TOKEN" \
+     http://localhost:9090/v1/backups/snap-<id>/restore \
+     -H "Content-Type: application/json" -d '{}'
+```
+
+See [docs/operations.md](docs/operations.md#backup-runbook) for the full runbook.
+
+## Observability
+
+- `/health` — Deep health report. Returns `503` if any required check fails. Inspect `checks[]` for which probe failed.
+- `/v1/health` — Token-gated equivalent of `/health`. Same shape.
+- `/v1/capabilities` — Static capability inventory (`hasWg`, `hasWgQuick`, `hasTun`, `hasIptables`, `ipForward`, etc).
+- `/metrics` — Prometheus text exposition. Counters, gauges, histograms for peer lifecycle, reconcile runs, apply duration, backup operations.
+- `/v1/audit?action=&actor=&since=` — Queryable persistent audit log (NDJSON, size-rotated).
+- Structured NDJSON logs to stdout, filtered by `KINTUNNEL_LOG_LEVEL` (`debug` / `info` / `warn` / `error`).
+
+See [docs/operations.md](docs/operations.md) for scrape configs and example queries.
+
 ## Documentation
 
 - [Quick Start](docs/quick-start.md)
 - [Docker Compose Installation](docs/installation/docker-compose.md)
 - [Dokploy Swarm Installation](docs/installation/dokploy-swarm.md)
 - [Architecture](docs/architecture.md)
+- [Operations Runbook](docs/operations.md)
 - [Security Model](docs/security/security-model.md)
+- [Privilege Model](docs/security.md)
 - [Brand](docs/brand.md)
 - [Release Checklist](docs/release-checklist.md)
 - [Roadmap](ROADMAP.md)
