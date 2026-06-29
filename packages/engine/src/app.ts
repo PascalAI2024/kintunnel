@@ -10,30 +10,48 @@ import { runHealthChecks } from "./health.js";
 import { createLogger } from "./logger.js";
 import { type Counter, type Histogram, createMetricsRegistry } from "./metrics.js";
 import { isPeerActive, peerApiStatus } from "./peers.js";
-import { ApplyError } from "./apply.js";
+import { ApplyError, setApplyAuditSink } from "./apply.js";
+import { setNetworkingAuditSink } from "./networking.js";
 import { getCapabilities, getRuntimeState, reconcile } from "./runtime.js";
 import { StateStore, ValidationError } from "./state.js";
-import type { AuditEvent, BackupManifest, EngineConfig, PeerRecord, ServerSettings } from "./types.js";
+import type {
+  AuditEvent,
+  BackupManifest,
+  EngineConfig,
+  PeerRecord,
+  PersonRecord,
+  ServerSettings
+} from "./types.js";
 
-export function createApp(config: EngineConfig) {
+export function createApp(config: EngineConfig): express.Express {
   assertStrongEngineApiToken(config.apiToken, config.env);
 
   const app = express();
   const api = express.Router();
-  const store = new StateStore(config);
-  const backups = createBackupStorage(config, store);
 
   // The /v1/audit endpoint and durable audit persistence need fields that
   // live on ResolvedEngineConfig (set by loadConfig). We cast at the boundary
   // because createApp's public signature remains EngineConfig-compatible.
   const resolved = config as ResolvedEngineConfig;
   const auditLogger = createLogger({ service: "kintunnel-engine-audit" });
-  const auditReady: Promise<AuditStore> = createAuditStore({
+  // Synchronously construct the audit store so the sink is available at
+  // StateStore construction time. Sinks fan out to the same internal write
+  // queue that `audit.append(...)` uses; the only difference is sync
+  // fire-and-forget vs. awaited append. The log directory is materialized
+  // lazily on the first append (see AuditStoreImpl.doAppend).
+  const audit: AuditStore = createAuditStore({
     logDir: resolved.auditLogDir,
     maxBytes: resolved.auditLogMaxBytes,
     retentionCount: resolved.auditLogRetentionCount,
     logger: auditLogger
   });
+  const store = new StateStore(config, audit.sink);
+  const backups = createBackupStorage(config, store);
+
+  // Wire apply.ts and networking.ts's module-level sinks so their private
+  // emitAudit helpers persist to the same NDJSON log as StateStore events.
+  setApplyAuditSink(audit.sink);
+  setNetworkingAuditSink(audit.sink);
 
   const metrics = createMetricsRegistry();
   // Default counters / gauges / histograms registered eagerly so /metrics
@@ -146,6 +164,46 @@ export function createApp(config: EngineConfig) {
     try {
       const state = await store.load();
       const runtime = await getRuntimeState(config, state);
+      // NEW (P3.4) — lazy expiry sweep on /status. Wrapped so a sweep
+      // failure cannot break the status read; reconcile is invoked only
+      // when auto-revoke actually changed peer state.
+      let expiry = {
+        newly_expired: 0,
+        auto_revoked: 0,
+        expiring_soon: [] as Array<{
+          peer_id: string;
+          name: string;
+          expires_at: string;
+          days_remaining: number;
+        }>
+      };
+      try {
+        const sweep = await store.sweepExpired({
+          autoRevoke: resolved.expiryAutoRevoke,
+          warnWithinDays: resolved.expiryWarnDays
+        });
+        if (sweep.auto_revoked.length > 0) {
+          // Push the revoke into the kernel so /status reflects what the
+          // running WireGuard interface will see. Best-effort: failures
+          // are surfaced via the runtime.error channel without breaking /status.
+          try {
+            await reconcile(config, await store.load());
+          } catch (reconcileError) {
+            auditLogger.warn("expiry sweep: post-revoke reconcile failed", {
+              error: reconcileError instanceof Error ? reconcileError.message : String(reconcileError)
+            });
+          }
+        }
+        expiry = {
+          newly_expired: sweep.expired.length,
+          auto_revoked: sweep.auto_revoked.length,
+          expiring_soon: sweep.expiring_soon
+        };
+      } catch (sweepError) {
+        auditLogger.warn("expiry sweep failed", {
+          error: sweepError instanceof Error ? sweepError.message : String(sweepError)
+        });
+      }
       res.json({
         ok: true,
         ready: runtime.exists,
@@ -167,6 +225,7 @@ export function createApp(config: EngineConfig) {
         },
         runtime,
         last_reconcile: state.lastReconcile,
+        expiry,
         checked_at: new Date().toISOString()
       });
     } catch (error) {
@@ -180,6 +239,30 @@ export function createApp(config: EngineConfig) {
       const status = typeof req.query.status === "string" ? req.query.status : undefined;
       const peers = status ? state.peers.filter((peer) => peer.status === status) : state.peers;
       res.json({ peers: peers.map(sanitizePeer) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // NEW (P3.4) — list soon-to-expire peers. Reuses the sweep helper with
+  // autoRevoke=false so this endpoint is read-only / reporting. `?days=N`
+  // overrides the configured warn window; falls back to config when the
+  // query param is missing or invalid.
+  api.get("/expiring", async (req, res, next) => {
+    try {
+      const rawDays = typeof req.query.days === "string" ? Number.parseInt(req.query.days, 10) : NaN;
+      const days = Number.isInteger(rawDays) && rawDays >= 0 && rawDays <= 365
+        ? rawDays
+        : resolved.expiryWarnDays;
+      const sweep = await store.sweepExpired({
+        autoRevoke: false,
+        warnWithinDays: days
+      });
+      res.json({
+        expiring_soon: sweep.expiring_soon,
+        warn_within_days: days,
+        generated_at: new Date().toISOString()
+      });
     } catch (error) {
       next(error);
     }
@@ -206,7 +289,6 @@ export function createApp(config: EngineConfig) {
       const limit = limitRaw !== undefined && Number.isInteger(limitRaw)
         ? Math.min(Math.max(limitRaw, 1), 5000)
         : 1000;
-      const audit = await auditReady;
       const events = await audit.query({ action, actor, since, limit });
       res.json({ events: events.map(sanitizeEvent) });
     } catch (error) {
@@ -266,7 +348,6 @@ export function createApp(config: EngineConfig) {
       // Fire-and-forget audit append for config exports (high-volume, low durability need).
       void (async () => {
         try {
-          const audit = await auditReady;
           await audit.append(auditRecord);
         } catch (error) {
           auditLogger.warn("audit append failed for peer.config.exported", {
@@ -350,7 +431,6 @@ export function createApp(config: EngineConfig) {
       // Durable audit append for reconcile.completed per spec.
       if (auditRecord) {
         try {
-          const audit = await auditReady;
           await audit.append(auditRecord);
         } catch (error) {
           auditLogger.warn("audit append failed for reconcile.completed", {
@@ -475,6 +555,143 @@ export function createApp(config: EngineConfig) {
     }
   });
 
+  // ── Person CRUD (P3.1) ───────────────────────────────────────────────────
+  // Persons are soft-deleted by default (`status="archived"`). Force-delete
+  // cascades through StateStore.deletePerson({ force: true }) and revokes
+  // (but does NOT hard-delete) the person's peers so the audit history
+  // survives.
+
+  api.get("/persons", async (req, res, next) => {
+    try {
+      const statusRaw = typeof req.query.status === "string" ? req.query.status : undefined;
+      const status = statusRaw === "active" || statusRaw === "archived" ? statusRaw : undefined;
+      const persons = await store.listPersons(status ? { status } : undefined);
+      res.json({ persons: persons.map(sanitizePerson) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.post("/persons", async (req, res, next) => {
+    try {
+      const person = await store.createPerson(req.body);
+      res.status(201).json({ person: sanitizePerson(person) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.get("/persons/:id", async (req, res, next) => {
+    try {
+      const state = await store.load();
+      const person = state.persons.find((candidate) => candidate.id === req.params.id);
+      if (!person) {
+        throw new ValidationError("Person not found.", { id: ["not found"] });
+      }
+      res.json({ person: sanitizePerson(person) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.patch("/persons/:id", async (req, res, next) => {
+    try {
+      const body = (req.body ?? {}) as {
+        displayName?: string;
+        display_name?: string;
+        notes?: string | null;
+        status?: "active" | "archived";
+      };
+      // The StateStore type is `notes?: string`, but the implementation
+      // accepts `null` as the explicit "clear notes" sentinel. Build the
+      // patch in our wider shape then cast at the boundary.
+      const patch: {
+        displayName?: string;
+        notes?: string | null;
+        status?: "active" | "archived";
+      } = {};
+      const rawName = body.displayName ?? body.display_name;
+      if (typeof rawName === "string") patch.displayName = rawName;
+      // Treat absence vs. null distinctly: missing key = no patch on notes;
+      // explicit null = clear notes (matches StateStore.updatePerson contract).
+      if (Object.prototype.hasOwnProperty.call(req.body ?? {}, "notes")) {
+        patch.notes = body.notes ?? null;
+      }
+      if (body.status === "active" || body.status === "archived") {
+        patch.status = body.status;
+      }
+      const person = await store.updatePerson(
+        req.params.id,
+        patch as Parameters<typeof store.updatePerson>[1]
+      );
+      res.json({ person: sanitizePerson(person) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.delete("/persons/:id", async (req, res, next) => {
+    try {
+      const body = (req.body ?? {}) as { force?: boolean };
+      const force = body.force === true;
+      // If the caller is not forcing the cascade, refuse when the person
+      // still owns active (non-revoked, non-deleted) peers. Surfacing 409
+      // lets the admin UI prompt the operator to use force=true (which
+      // revokes peers) or revoke explicitly first.
+      if (!force) {
+        const state = await store.load();
+        const activePeers = state.peers.filter(
+          (peer) => peer.personId === req.params.id && peer.status !== "revoked" && peer.status !== "deleted"
+        );
+        if (activePeers.length > 0) {
+          res.status(409).json({
+            error: {
+              code: "person_has_active_devices",
+              message: "Person has active devices; retry with force=true to revoke them.",
+              fields: { force: ["required when active devices are present"] }
+            }
+          });
+          return;
+        }
+      }
+      const person = await store.deletePerson(req.params.id, { force });
+      res.json({ person: sanitizePerson(person) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.get("/persons/:id/devices", async (req, res, next) => {
+    try {
+      const state = await store.load();
+      const person = state.persons.find((candidate) => candidate.id === req.params.id);
+      if (!person) {
+        throw new ValidationError("Person not found.", { id: ["not found"] });
+      }
+      const peers = state.peers
+        .filter((peer) => peer.personId === person.id && peer.status !== "deleted")
+        .map(sanitizePeer);
+      res.json({ devices: peers });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.post("/persons/:id/revoke-devices", async (req, res, next) => {
+    try {
+      const body = (req.body ?? {}) as { actor?: string };
+      const actor = typeof body.actor === "string" && body.actor.trim().length > 0 ? body.actor.trim() : "engine";
+      const result = await store.revokePersonDevices(req.params.id, actor);
+      res.json({
+        revoked_count: result.revokedPeerIds.length,
+        already_revoked_count: result.alreadyRevoked,
+        revoked_peer_ids: result.revokedPeerIds
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.use("/v1", api);
   app.use("/api/v1", api);
 
@@ -526,7 +743,20 @@ function sanitizePeer(peer: PeerRecord) {
     created_at: peer.createdAt,
     updated_at: peer.updatedAt,
     revoked_at: peer.revokedAt,
-    deleted_at: peer.deletedAt
+    deleted_at: peer.deletedAt,
+    person_id: peer.personId,
+    device_label: peer.deviceLabel
+  };
+}
+
+function sanitizePerson(person: PersonRecord) {
+  return {
+    id: person.id,
+    display_name: person.displayName,
+    notes: person.notes,
+    status: person.status,
+    created_at: person.createdAt,
+    updated_at: person.updatedAt
   };
 }
 

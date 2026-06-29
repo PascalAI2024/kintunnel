@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { isPeerActive } from "./peers.js";
 import { withFileLock } from "./state.js";
+import type { AuditSink } from "./audit-store.js";
 import type {
   ApplyPlan,
   ApplyRequest,
@@ -16,6 +17,16 @@ import type {
 } from "./types.js";
 import { getRuntimeState } from "./runtime.js";
 import type { RuntimeState } from "./runtime.js";
+
+// Module-level audit sink. Wired by app.ts at createApp startup so apply.ts's
+// private emitAudit helper can fire-and-forget writes to the persistent NDJSON
+// log without threading the sink through every internal call.
+let _applyAuditSink: AuditSink | undefined;
+
+/** Inject the audit sink used by apply.ts's private emitAudit. Called once at startup. */
+export function setApplyAuditSink(sink: AuditSink | undefined): void {
+  _applyAuditSink = sink;
+}
 
 export type ApplyErrorCode =
   | "capability_missing"
@@ -620,4 +631,14 @@ function emitAudit(
     metadata
   };
   state.events = [...(state.events ?? []), record].slice(-250);
+
+  // Fire-and-forget persist to the persistent NDJSON sink. Sink MUST NOT
+  // throw — wrap defensively so a faulty sink never crashes the engine.
+  if (_applyAuditSink) {
+    try {
+      _applyAuditSink.write(record);
+    } catch {
+      // audit must not crash engine; swallowed by spec
+    }
+  }
 }

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
+import type { AuditSink } from "./audit-store.js";
 import type {
   AuditAction,
   EngineConfig,
@@ -439,6 +440,16 @@ async function commandExists(command: string): Promise<boolean> {
   }
 }
 
+// Module-level audit sink. Wired by app.ts at createApp startup so networking.ts's
+// private emitAudit helper can fire-and-forget writes to the persistent NDJSON
+// log without threading the sink through every internal call.
+let _networkingAuditSink: AuditSink | undefined;
+
+/** Inject the audit sink used by networking.ts's private emitAudit. Called once at startup. */
+export function setNetworkingAuditSink(sink: AuditSink | undefined): void {
+  _networkingAuditSink = sink;
+}
+
 function emitAudit(
   state: EngineState,
   action: AuditAction,
@@ -457,6 +468,16 @@ function emitAudit(
     metadata
   };
   state.events = [...(state.events ?? []), record].slice(-MAX_AUDIT_EVENTS);
+
+  // Fire-and-forget persist to the persistent NDJSON sink. Sink MUST NOT
+  // throw — wrap defensively so a faulty sink never crashes the engine.
+  if (_networkingAuditSink) {
+    try {
+      _networkingAuditSink.write(record);
+    } catch {
+      // audit must not crash engine; swallowed by spec
+    }
+  }
 }
 
 function buildResult(

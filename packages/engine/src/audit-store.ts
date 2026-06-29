@@ -18,6 +18,16 @@ import type { Logger } from "./logger.js";
  * engine never crashes because of audit persistence. Query and rotate
  * propagate errors because they are operator-initiated and rare.
  */
+/**
+ * Minimal sink interface for fire-and-forget audit writes from any code path.
+ * Implementations MUST NOT throw — if audit persistence fails, the sink logs
+ * a warning and continues. Sinks MUST NOT block the caller; appendEvent in
+ * StateStore invokes this synchronously without awaiting the underlying IO.
+ */
+export interface AuditSink {
+  write(event: AuditEvent): void;
+}
+
 export interface AuditStore {
   append(event: AuditEvent): Promise<void>;
   query(filter: {
@@ -28,6 +38,13 @@ export interface AuditStore {
   }): Promise<AuditEvent[]>;
   rotate(): Promise<{ rotated: boolean; reason: string }>;
   flush(): Promise<void>;
+  /**
+   * Synchronous fire-and-forget sink for hot-path callers (e.g.
+   * StateStore.appendEvent). Wraps `append()` in `void` so the underlying
+   * IO never blocks the caller; append() already swallows write errors
+   * via the internal write queue + logger.
+   */
+  readonly sink: AuditSink;
 }
 
 export interface AuditStoreConfig {
@@ -39,10 +56,17 @@ export interface AuditStoreConfig {
 
 const ROTATION_PREFIX = "audit.log.";
 
-export async function createAuditStore(config: AuditStoreConfig): Promise<AuditStore> {
-  await fs.mkdir(config.logDir, { recursive: true });
-  const store = new AuditStoreImpl(config);
-  return store;
+/**
+ * Construct an `AuditStore` synchronously. The log directory is created
+ * lazily on the first append (see `AuditStoreImpl.doAppend`) so callers
+ * like `createApp` can wire the sink during a synchronous startup sequence
+ * without `await`. Existing callers that previously awaited this function
+ * can drop the `await` — the return type was narrowed from
+ * `Promise<AuditStore>` to `AuditStore` as part of the Phase 2.5 sink
+ * injection work.
+ */
+export function createAuditStore(config: AuditStoreConfig): AuditStore {
+  return new AuditStoreImpl(config);
 }
 
 class AuditStoreImpl implements AuditStore {
@@ -53,6 +77,14 @@ class AuditStoreImpl implements AuditStore {
   private readonly currentPath: string;
   private handle: import("node:fs/promises").FileHandle | null = null;
   private writeQueue: Promise<void> = Promise.resolve();
+  public readonly sink: AuditSink = {
+    write: (event: AuditEvent): void => {
+      // Fire-and-forget: append() already swallows errors internally via
+      // its own writeQueue + logger. The redundant .catch guards against
+      // any future change to append() that lets an error escape.
+      void this.append(event).catch(() => undefined);
+    }
+  };
 
   constructor(config: AuditStoreConfig) {
     this.logDir = config.logDir;
@@ -89,7 +121,15 @@ class AuditStoreImpl implements AuditStore {
     const sinceTime = filter.since ? Date.parse(filter.since) : NaN;
     const sinceValid = Number.isFinite(sinceTime);
 
-    const entries = await fs.readdir(this.logDir);
+    // The log directory is created lazily on the first append. If a query
+    // arrives before any append, treat the empty directory as "no events".
+    let entries: string[];
+    try {
+      entries = await fs.readdir(this.logDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
     // Oldest first so we walk files in chronological order; newest entries
     // are sorted within the merged array later.
     const files = entries
@@ -160,6 +200,11 @@ class AuditStoreImpl implements AuditStore {
 
   private async doAppend(event: AuditEvent): Promise<void> {
     if (!this.handle) {
+      // Lazy directory creation: createAuditStore is synchronous, so the
+      // log directory is materialized on the first write rather than at
+      // construction time. mkdir with recursive:true is a no-op if it
+      // already exists.
+      await fs.mkdir(path.dirname(this.currentPath), { recursive: true });
       this.handle = await fs.open(this.currentPath, "a");
     }
     const line = `${JSON.stringify(event)}\n`;
