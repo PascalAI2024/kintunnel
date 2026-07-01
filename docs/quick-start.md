@@ -81,6 +81,10 @@ docker compose logs --tail 100
 
 8. Have the user install the official WireGuard client and import the QR code or config file.
 
+<p align="center">
+  <img src="assets/screenshots/peer-detail.png" alt="KinTunnel peer detail page with QR code and config download" width="640">
+</p>
+
 9. In dry-run mode, verify the generated config. In non-dry-run test environments, verify the client public IP matches the VPS public IP.
 
 ## First Verification

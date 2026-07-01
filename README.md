@@ -13,6 +13,10 @@ KinTunnel is an original, Docker-native family VPN manager for WireGuard deploym
 
 It is built for one simple job: give trusted people a private VPN exit through a VPS without turning the project into an enterprise mesh networking platform. Sensible. Almost suspiciously so.
 
+<p align="center">
+  <img src="docs/assets/screenshots/admin-dashboard.png" alt="KinTunnel admin dashboard showing peer list, engine health, and recent activity" width="820">
+</p>
+
 ## Why KinTunnel
 
 - One VPS.
