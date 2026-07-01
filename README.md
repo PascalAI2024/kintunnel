@@ -152,6 +152,8 @@ See [docs/operations.md](docs/operations.md) for scrape configs and example quer
 
 ## Documentation
 
+Full docs are published at **[pascalai2024.github.io/kintunnel](https://pascalai2024.github.io/kintunnel/)**. The same source renders directly on GitHub:
+
 - [Quick Start](docs/quick-start.md)
 - [Docker Compose Installation](docs/installation/docker-compose.md)
 - [Dokploy Swarm Installation](docs/installation/dokploy-swarm.md)

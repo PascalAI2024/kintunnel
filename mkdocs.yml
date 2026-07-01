@@ -1,5 +1,6 @@
 site_name: KinTunnel
 site_description: Operator documentation for KinTunnel.
+site_url: https://pascalai2024.github.io/kintunnel/
 repo_url: https://github.com/PascalAI2024/kintunnel
 edit_uri: edit/main/docs/
 docs_dir: docs
