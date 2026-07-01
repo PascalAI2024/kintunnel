@@ -98,6 +98,37 @@ describe("engine process with admin HTTP client", () => {
       deleted: 1
     });
   });
+
+  it("creates, reads, updates, and deletes a person through HttpEngineClient", async () => {
+    const client = new HttpEngineClient(`http://127.0.0.1:${port}`);
+    client.configure({ apiToken: "engine-token" });
+
+    const created = await client.createPerson({ displayName: "Integration Alice", notes: "test person" });
+    expect(created.id).toBeDefined();
+    expect(created.display_name).toBe("Integration Alice");
+    expect(created.status).toBe("active");
+
+    const listed = await client.listPersons();
+    expect(listed.map((person) => person.id)).toContain(created.id);
+
+    const fetched = await client.getPerson(created.id);
+    expect(fetched).toMatchObject({ id: created.id, display_name: "Integration Alice" });
+
+    const devices = await client.listPersonDevices(created.id);
+    expect(devices).toEqual([]);
+
+    const updated = await client.updatePerson(created.id, { displayName: "Integration Alice Updated" });
+    expect(updated.display_name).toBe("Integration Alice Updated");
+
+    const deleted = await client.deletePerson(created.id);
+    expect(deleted.status).toBe("archived");
+
+    const afterDelete = await client.getPerson(created.id);
+    expect(afterDelete.status).toBe("archived");
+
+    const activeOnly = await client.listPersons({ status: "active" });
+    expect(activeOnly.map((person) => person.id)).not.toContain(created.id);
+  });
 });
 
 async function getAvailablePort(): Promise<number> {

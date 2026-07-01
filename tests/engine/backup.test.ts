@@ -270,6 +270,28 @@ describe("backup.ts", () => {
         storage.backupRestore({ snapshot_id: summary.snapshot_id, apply: false }, "test")
       ).rejects.toMatchObject({ name: "BackupError", code: "checksum_mismatch" });
     });
+
+    it("apply:false validates without side effects (dry-run)", async () => {
+      const state = buildState([
+        { publicKey: "PUBKEY_A", addressV4: "10.55.0.2/32", name: "alice" }
+      ]);
+      await seedState(tempDir, state);
+
+      const summary = await storage.backupCreate({ trigger: "manual", actor: "test" });
+      const preCount = (await storage.backupList()).length;
+
+      const result = await storage.backupRestore({ snapshot_id: summary.snapshot_id, apply: false }, "test");
+
+      // apply:false is documented as dry-run (types.ts BackupRestoreRequest)
+      // — succeeding at validation is `ok:true`, not a failure, and it must
+      // not create a safety snapshot since nothing is being overwritten.
+      expect(result.ok).toBe(true);
+      expect(result.applied).toBe(false);
+      expect(result.safetySnapshotId).toBeUndefined();
+
+      const postCount = (await storage.backupList()).length;
+      expect(postCount).toBe(preCount);
+    });
   });
 
   describe("backupRestorePlan", () => {

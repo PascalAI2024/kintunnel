@@ -309,7 +309,10 @@ export async function rollbackNetworking(
  * Test whether a MASQUERADE rule matching the supplied parameters is
  * present in the `nat` table. Used by the health probe (Wave 5) and by
  * `/v1/capabilities` for an at-a-glance status. Mirrors the exact rule
- * shape `applyNetworking` inserts.
+ * shape `applyNetworking` inserts — including the KinTunnel comment
+ * marker, without which `-C` would also report "present" for any
+ * unrelated MASQUERADE rule that happens to share the same source CIDR
+ * and egress interface (e.g. one Docker or another tool installed).
  */
 export async function checkNatRulePresent(
   _interfaceName: string,
@@ -321,6 +324,8 @@ export async function checkNatRulePresent(
       "-t", "nat", "-C", "POSTROUTING",
       "-s", tunnelCidrV4,
       "-o", egressIface,
+      "-m", "comment",
+      "--comment", KINTUNNEL_NAT_MASQUERADE,
       "-j", "MASQUERADE"
     ]);
     return result.exit === 0;

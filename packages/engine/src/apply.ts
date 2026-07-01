@@ -74,18 +74,23 @@ export class ApplyError extends Error {
  */
 export function planApply(state: EngineState, runtime: RuntimeState): ApplyPlan {
   const activePeers = state.peers.filter((peer) => isPeerActive(peer));
-  const intendedPublicKeys = new Set(activePeers.map((peer) => peer.publicKey));
-  const currentPublicKeys = new Set(runtime.peers.map((peer) => peer.publicKey));
+  const intendedByKey = new Map(activePeers.map((peer) => [peer.publicKey, peer]));
+  const currentByKey = new Map(runtime.peers.map((peer) => [peer.publicKey, peer]));
 
   const addPeers: string[] = [];
   const removePeers: string[] = [];
   const modifyPeers: string[] = [];
 
-  for (const pubKey of intendedPublicKeys) {
-    if (!currentPublicKeys.has(pubKey)) addPeers.push(pubKey);
+  for (const [pubKey, peer] of intendedByKey) {
+    const runtimePeer = currentByKey.get(pubKey);
+    if (!runtimePeer) {
+      addPeers.push(pubKey);
+    } else if (peerConfigChanged(peer, runtimePeer)) {
+      modifyPeers.push(pubKey);
+    }
   }
-  for (const pubKey of currentPublicKeys) {
-    if (!intendedPublicKeys.has(pubKey)) removePeers.push(pubKey);
+  for (const pubKey of currentByKey.keys()) {
+    if (!intendedByKey.has(pubKey)) removePeers.push(pubKey);
   }
 
   const bootstrap = !runtime.exists;
@@ -111,21 +116,45 @@ export function planApply(state: EngineState, runtime: RuntimeState): ApplyPlan 
  */
 export async function diffPeers(
   intended: PeerRecord[],
-  currentPublicKeys: Set<string>
+  current: RuntimeState["peers"]
 ): Promise<{ add: string[]; remove: string[]; modify: string[] }> {
-  const intendedPublicKeys = new Set(intended.map((peer) => peer.publicKey));
+  const intendedByKey = new Map(intended.map((peer) => [peer.publicKey, peer]));
+  const currentByKey = new Map(current.map((peer) => [peer.publicKey, peer]));
   const add: string[] = [];
   const remove: string[] = [];
   const modify: string[] = [];
 
-  for (const pubKey of intendedPublicKeys) {
-    if (!currentPublicKeys.has(pubKey)) add.push(pubKey);
+  for (const [pubKey, peer] of intendedByKey) {
+    const runtimePeer = currentByKey.get(pubKey);
+    if (!runtimePeer) {
+      add.push(pubKey);
+    } else if (peerConfigChanged(peer, runtimePeer)) {
+      modify.push(pubKey);
+    }
   }
-  for (const pubKey of currentPublicKeys) {
-    if (!intendedPublicKeys.has(pubKey)) remove.push(pubKey);
+  for (const pubKey of currentByKey.keys()) {
+    if (!intendedByKey.has(pubKey)) remove.push(pubKey);
   }
 
   return { add, remove, modify };
+}
+
+/**
+ * A peer already present on both sides is "modified" if the fields that
+ * actually reach the server-side WireGuard config (AllowedIPs — scoped to
+ * the peer's own address, see renderWgIni — and PersistentKeepalive) differ
+ * from what the kernel currently reports. `syncconf` re-applies the full
+ * peer set every call regardless, so this doesn't change what gets
+ * enforced — it only makes the add/remove/modify diagnostics accurate.
+ */
+function peerConfigChanged(
+  intended: PeerRecord,
+  runtime: RuntimeState["peers"][number]
+): boolean {
+  const currentAllowedIps = [...runtime.allowedIps].sort().join(",");
+  const currentKeepalive = runtime.persistentKeepalive ?? 0;
+  const intendedKeepalive = intended.persistentKeepalive ?? 0;
+  return currentAllowedIps !== intended.addressV4 || currentKeepalive !== intendedKeepalive;
 }
 
 /**
@@ -146,10 +175,19 @@ export function renderWgIni(state: EngineState, activeOnly: boolean): string {
     : state.peers;
 
   for (const peer of peers) {
-    lines.push("", "[Peer]", `PublicKey = ${peer.publicKey}`);
-    if (peer.allowedIps.length > 0) {
-      lines.push(`AllowedIPs = ${peer.allowedIps.join(", ")}`);
-    }
+    // Server-side AllowedIPs scopes cryptokey routing to this peer's own
+    // tunnel address, NOT the client's routing intent (peer.allowedIps,
+    // typically 0.0.0.0/0 for full tunnel — that value belongs in the
+    // client's own config, see config-render.ts). Reusing peer.allowedIps
+    // here would give every full-tunnel peer an identical AllowedIPs entry,
+    // and WireGuard only routes each prefix to one peer — later peers would
+    // silently steal the route from earlier ones.
+    lines.push(
+      "",
+      "[Peer]",
+      `PublicKey = ${peer.publicKey}`,
+      `AllowedIPs = ${peer.addressV4}`
+    );
     if (peer.persistentKeepalive > 0) {
       lines.push(`PersistentKeepalive = ${peer.persistentKeepalive}`);
     }
@@ -201,8 +239,7 @@ export async function executeApply(req: ApplyRequest): Promise<ApplyResult> {
   // Dry-run path: plan + render + diff, no host exec, no audit events.
   if (req.dryRun) {
     const runtime = snapshotDryRun(req.state);
-    const currentPublicKeys = new Set(runtime.peers.map((peer) => peer.publicKey));
-    const diff = await diffPeers(activePeers, currentPublicKeys);
+    const diff = await diffPeers(activePeers, runtime.peers);
     const plan = planApply(req.state, runtime);
     const ini = renderWgIni(req.state, true);
 
@@ -246,8 +283,7 @@ export async function executeApply(req: ApplyRequest): Promise<ApplyResult> {
       const config = resolveConfigFromState(req.state);
       const runtime = await getRuntimeState(config, req.state);
       const plan = planApply(req.state, runtime);
-      const currentPublicKeys = new Set(runtime.peers.map((peer) => peer.publicKey));
-      const diff = await diffPeers(activePeers, currentPublicKeys);
+      const diff = await diffPeers(activePeers, runtime.peers);
       const peerChanges = {
         added: diff.add,
         removed: diff.remove,
@@ -567,7 +603,8 @@ function snapshotDryRun(state: EngineState): RuntimeState {
       .filter((peer) => isPeerActive(peer))
       .map((peer: PeerRecord) => ({
         publicKey: peer.publicKey,
-        allowedIps: [peer.addressV4]
+        allowedIps: [peer.addressV4],
+        persistentKeepalive: peer.persistentKeepalive
       })),
     rawAvailable: false
   };

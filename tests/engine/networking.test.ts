@@ -351,8 +351,10 @@ describe("networking.ts", () => {
 
       const iptablesCalls = execState.calls.filter((c) => c.command === "iptables");
       expect(iptablesCalls).toHaveLength(0);
-      // In dry-run the plan is still computed and reported.
-      expect(result.rulesInserted.length).toBeGreaterThanOrEqual(0);
+      // In dry-run, insertOutcome is unconditionally "ok" for every managed
+      // rule spec (no real exec) — all 4 (3 FORWARD + 1 MASQUERADE) should
+      // still be reported as "inserted" so the plan is fully visible.
+      expect(result.rulesInserted).toHaveLength(4);
     });
   });
 

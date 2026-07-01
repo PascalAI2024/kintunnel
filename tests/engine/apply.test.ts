@@ -426,22 +426,35 @@ describe("apply.ts", () => {
     it("returns the expected add/remove/modify sets", async () => {
       const intended: PeerRecord[] = [
         buildActivePeer({ publicKey: "KEEP", addressV4: "10.55.0.2/32" }),
-        buildActivePeer({ id: "peer-new", name: "new", publicKey: "ADD", addressV4: "10.55.0.3/32" })
+        buildActivePeer({ id: "peer-new", name: "new", publicKey: "ADD", addressV4: "10.55.0.3/32" }),
+        buildActivePeer({
+          id: "peer-changed",
+          name: "changed",
+          publicKey: "CHANGED",
+          addressV4: "10.55.0.4/32",
+          persistentKeepalive: 25
+        })
       ];
-      const currentPublicKeys = new Set(["KEEP", "REMOVE"]);
+      const current: RuntimeState["peers"] = [
+        { publicKey: "KEEP", allowedIps: ["10.55.0.2/32"] },
+        { publicKey: "REMOVE", allowedIps: ["10.55.0.9/32"] },
+        // Present on both sides, but the kernel's keepalive doesn't match
+        // intended state — must surface as "modify", not silently ignored.
+        { publicKey: "CHANGED", allowedIps: ["10.55.0.4/32"], persistentKeepalive: 0 }
+      ];
 
-      const diff = await diffPeers(intended, currentPublicKeys);
+      const diff = await diffPeers(intended, current);
 
       expect(diff.add).toEqual(["ADD"]);
       expect(diff.remove).toEqual(["REMOVE"]);
-      expect(diff.modify).toEqual([]);
+      expect(diff.modify).toEqual(["CHANGED"]);
     });
   });
 
   describe("renderWgIni", () => {
     it("includes [Interface] + [Peer] sections", () => {
       const state = buildState([
-        buildActivePeer({ publicKey: "PUBKEY_A", allowedIps: ["10.55.0.2/32"] })
+        buildActivePeer({ publicKey: "PUBKEY_A", addressV4: "10.55.0.2/32", allowedIps: ["0.0.0.0/0"] })
       ]);
 
       const ini = renderWgIni(state, true);
@@ -452,6 +465,26 @@ describe("apply.ts", () => {
       expect(ini).toContain("[Peer]");
       expect(ini).toContain("PublicKey = PUBKEY_A");
       expect(ini).toContain("AllowedIPs = 10.55.0.2/32");
+    });
+
+    it("scopes each peer's server-side AllowedIPs to its own address, not the client's full-tunnel AllowedIPs", () => {
+      // Regression test: every peer defaults to allowedIps=["0.0.0.0/0"]
+      // (full tunnel, see .env.example KINTUNNEL_ALLOWED_IPS). Server-side
+      // AllowedIPs must be each peer's own /32 — reusing the client's
+      // 0.0.0.0/0 for every peer would make WireGuard route the shared
+      // prefix to whichever peer synced last, breaking all the others.
+      const state = buildState([
+        buildActivePeer({ publicKey: "PUBKEY_A", addressV4: "10.55.0.2/32", allowedIps: ["0.0.0.0/0"] }),
+        buildActivePeer({ publicKey: "PUBKEY_B", addressV4: "10.55.0.3/32", allowedIps: ["0.0.0.0/0"] })
+      ]);
+
+      const ini = renderWgIni(state, true);
+
+      expect(ini).toContain("PublicKey = PUBKEY_A");
+      expect(ini).toContain("PublicKey = PUBKEY_B");
+      expect(ini).toContain("AllowedIPs = 10.55.0.2/32");
+      expect(ini).toContain("AllowedIPs = 10.55.0.3/32");
+      expect(ini).not.toContain("AllowedIPs = 0.0.0.0/0");
     });
   });
 });

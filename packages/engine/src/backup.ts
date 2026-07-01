@@ -433,19 +433,22 @@ export function createBackupStorage(config: EngineConfig, store: StateStore): Ba
           );
         }
 
-        let safetySnapshotId: string | undefined;
-        if (!req.force) {
-          const safety = await snapshotInternal({ trigger: "pre-rotate", actor });
-          safetySnapshotId = safety.snapshot_id;
-        }
-
         let applied = false;
         let reconciled = false;
         let fromRevision: number | undefined;
         let errorMessage: string | undefined;
+        // Only taken once we're actually about to overwrite state — a
+        // apply:false (dry-run) request validates the checksum but must not
+        // have side effects, so it takes no safety snapshot.
+        let safetySnapshotId: string | undefined;
 
         try {
           if (req.apply) {
+            if (!req.force) {
+              const safety = await snapshotInternal({ trigger: "pre-rotate", actor });
+              safetySnapshotId = safety.snapshot_id;
+            }
+
             const currentState = await store.load();
             fromRevision = currentState.revision;
 
@@ -487,7 +490,12 @@ export function createBackupStorage(config: EngineConfig, store: StateStore): Ba
           }
 
           return {
-            ok: applied,
+            // Reaching this line means the requested operation succeeded —
+            // either a validated dry-run (apply:false) or a completed
+            // restore (apply:true, applied=true). Any failure to actually
+            // write state throws and is handled by the catch block below,
+            // which does not return this object.
+            ok: true,
             applied,
             reconciled,
             safetySnapshotId,

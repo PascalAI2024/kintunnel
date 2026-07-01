@@ -74,6 +74,40 @@ describe("admin app", () => {
       calls.push({ method: "DELETE", path: `/api/v1/peers/${req.params.id}` });
       res.status(204).send();
     });
+    engine.get("/api/v1/persons", (_req, res) => {
+      calls.push({ method: "GET", path: "/api/v1/persons" });
+      res.json({
+        persons: [
+          { id: "person-1", display_name: "Alice", status: "active", created_at: "2026-05-17T00:00:00.000Z", updated_at: "2026-05-17T00:00:00.000Z" }
+        ]
+      });
+    });
+    engine.post("/api/v1/persons", (req, res) => {
+      calls.push({ method: "POST", path: "/api/v1/persons", body: req.body });
+      // The real engine accepts both displayName and display_name (state.ts
+      // parsePersonCreate); the admin client actually sends camelCase here.
+      res.status(201).json({ person: { id: "person-2", display_name: req.body.displayName, status: "active" } });
+    });
+    engine.get("/api/v1/persons/:id", (req, res) => {
+      calls.push({ method: "GET", path: `/api/v1/persons/${req.params.id}` });
+      if (req.params.id === "missing") {
+        res.status(404).json({ error: { code: "not_found", message: "Person not found." } });
+        return;
+      }
+      res.json({ person: { id: req.params.id, display_name: "Alice", status: "active", created_at: "2026-05-17T00:00:00.000Z", updated_at: "2026-05-17T00:00:00.000Z" } });
+    });
+    engine.get("/api/v1/persons/:id/devices", (req, res) => {
+      calls.push({ method: "GET", path: `/api/v1/persons/${req.params.id}/devices` });
+      res.json({ devices: [{ id: "peer-1", name: "alice-phone", status: "active", address_v4: "10.44.0.2/32" }] });
+    });
+    engine.patch("/api/v1/persons/:id", (req, res) => {
+      calls.push({ method: "PATCH", path: `/api/v1/persons/${req.params.id}`, body: req.body });
+      res.json({ person: { id: req.params.id, display_name: req.body.display_name ?? "Alice", status: req.body.status ?? "active" } });
+    });
+    engine.delete("/api/v1/persons/:id", (req, res) => {
+      calls.push({ method: "DELETE", path: `/api/v1/persons/${req.params.id}` });
+      res.json({ person: { id: req.params.id, display_name: "Alice", status: "archived" } });
+    });
 
     await new Promise<void>((resolve, reject) => {
       engineServer = engine.listen(0, "127.0.0.1", (error?: Error) => {
@@ -215,6 +249,81 @@ describe("admin app", () => {
 
     expect(calls).toContainEqual({ method: "GET", path: "/api/v1/peers/missing" });
     expect(calls).not.toContainEqual({ method: "GET", path: "/v1/peers/missing" });
+  });
+
+  describe("people", () => {
+    it("renders the people list", async () => {
+      const app = createApp({ config: { ...config, engineUrl } });
+      const response = await request(app).get("/people").set("Authorization", "Bearer test-token");
+
+      expect(response.status).toBe(200);
+      expect(response.text).toContain("Alice");
+      expect(calls).toContainEqual({ method: "GET", path: "/api/v1/persons" });
+    });
+
+    it("creates a person through the engine", async () => {
+      const app = createApp({ config: { ...config, engineUrl } });
+      const response = await request(app)
+        .post("/people/new")
+        .set("Authorization", "Bearer test-token")
+        .type("form")
+        .send({ display_name: "Bob" });
+
+      expect(response.status).toBe(302);
+      expect(response.header.location).toBe("/people/person-2");
+      expect(calls).toContainEqual({
+        method: "POST",
+        path: "/api/v1/persons",
+        body: { displayName: "Bob" }
+      });
+    });
+
+    it("renders a person's detail page with their devices", async () => {
+      const app = createApp({ config: { ...config, engineUrl } });
+      const response = await request(app).get("/people/person-1").set("Authorization", "Bearer test-token");
+
+      expect(response.status).toBe(200);
+      expect(response.text).toContain("Alice");
+      expect(response.text).toContain("alice-phone");
+      expect(calls).toContainEqual({ method: "GET", path: "/api/v1/persons/person-1" });
+      expect(calls).toContainEqual({ method: "GET", path: "/api/v1/persons/person-1/devices" });
+    });
+
+    it("edits a person through the engine", async () => {
+      const app = createApp({ config: { ...config, engineUrl } });
+      const response = await request(app)
+        .post("/people/person-1/edit")
+        .set("Authorization", "Bearer test-token")
+        .type("form")
+        .send({ display_name: "Alice Updated", status: "active" });
+
+      expect(response.status).toBe(302);
+      expect(response.header.location).toBe("/people/person-1");
+      expect(calls).toContainEqual({
+        method: "PATCH",
+        path: "/api/v1/persons/person-1",
+        body: { display_name: "Alice Updated", status: "active" }
+      });
+    });
+
+    it("deletes a person through the engine", async () => {
+      const app = createApp({ config: { ...config, engineUrl } });
+      const response = await request(app)
+        .post("/people/person-1/delete")
+        .set("Authorization", "Bearer test-token");
+
+      expect(response.status).toBe(302);
+      expect(response.header.location).toBe("/people");
+      expect(calls).toContainEqual({ method: "DELETE", path: "/api/v1/persons/person-1" });
+    });
+
+    it("propagates a 404 from the engine for an unknown person", async () => {
+      const app = createApp({ config: { ...config, engineUrl } });
+      const response = await request(app).get("/people/missing").set("Authorization", "Bearer test-token");
+
+      expect(response.status).toBe(502);
+      expect(calls).toContainEqual({ method: "GET", path: "/api/v1/persons/missing" });
+    });
   });
 });
 

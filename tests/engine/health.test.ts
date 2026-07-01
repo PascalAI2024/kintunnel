@@ -1,3 +1,4 @@
+import { constants as fsConstants } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 // ── Mock node:child_process ────────────────────────────────────────────────
@@ -67,7 +68,8 @@ vi.mock("node:child_process", async () => {
 // per-test tun-accessibility flag.
 const fsState = vi.hoisted(() => ({
   procFiles: new Map<string, string>(),
-  tunReadable: true
+  tunReadable: true,
+  accessCalls: [] as Array<{ target: string; mode?: number }>
 }));
 
 vi.mock("node:fs/promises", async () => {
@@ -80,7 +82,8 @@ vi.mock("node:fs/promises", async () => {
     err.code = "ENOENT";
     throw err;
   };
-  const accessImpl = async (target: string, _mode?: number): Promise<void> => {
+  const accessImpl = async (target: string, mode?: number): Promise<void> => {
+    fsState.accessCalls.push({ target, mode });
     if (target === "/dev/net/tun") {
       if (!fsState.tunReadable) {
         const err = new Error(`EACCES: permission denied, access '${target}'`) as NodeJS.ErrnoException;
@@ -90,7 +93,7 @@ vi.mock("node:fs/promises", async () => {
       return;
     }
     // For other access calls (e.g. statePath), call the real implementation.
-    return actual.access(target, _mode);
+    return actual.access(target, mode);
   };
   return {
     ...actual,
@@ -172,6 +175,7 @@ describe("health.ts", () => {
     execState.responder = () => ({ stdout: "", stderr: "", exit: 0 });
     fsState.procFiles.clear();
     fsState.tunReadable = true;
+    fsState.accessCalls.length = 0;
   });
 
   describe("checkTun", () => {
@@ -190,18 +194,17 @@ describe("health.ts", () => {
     });
 
     it("does NOT open for write (R_OK only)", async () => {
-      // checkTun calls pathExists with fsConstants.R_OK. We can't directly
-      // assert against the constants imported into health.ts, but we can
-      // assert the check succeeds when only R_OK is sufficient — i.e.
-      // that the implementation doesn't require W_OK for a tun probe.
-      // If the implementation tried to open for write, our mock would
-      // still resolve (we accept all modes for /dev/net/tun when
-      // tunReadable=true), but the assert that checkTun returns "pass"
-      // without invoking a write-only path is implicit in the pass case.
+      // Opening /dev/net/tun for write would consume the device — checkTun
+      // must probe with R_OK only, never W_OK, regardless of pass/fail.
       fsState.tunReadable = true;
       const result = await checkTun();
       expect(result.status).toBe("pass");
       expect(result.detail).toContain("/dev/net/tun");
+
+      const tunCall = fsState.accessCalls.find((call) => call.target === "/dev/net/tun");
+      expect(tunCall).toBeDefined();
+      expect(tunCall!.mode).toBe(fsConstants.R_OK);
+      expect((tunCall!.mode ?? 0) & fsConstants.W_OK).toBe(0);
     });
   });
 
