@@ -25,7 +25,7 @@ ENV NODE_ENV=production \
     KINTUNNEL_NAT_APPLY=false
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libc-bin libc6 libcap2 libsystemd0 libudev1 curl iproute2 iptables wireguard-tools flock uuid-runtime ca-certificates \
+    && apt-get install -y --no-install-recommends libc-bin libc6 libcap2 libsystemd0 libudev1 curl iproute2 iptables wireguard-tools uuid-runtime ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./

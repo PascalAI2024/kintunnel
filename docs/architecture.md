@@ -4,7 +4,7 @@ KinTunnel is a single-server WireGuard VPN service. The first production shape i
 
 ## System Overview
 
-KinTunnel follows the two-service split locked in [ADR-0002](../adr/0002-two-service-admin-engine-split.md). One privileged service owns the host networking primitives; one unprivileged service owns authentication, audit, and the operator-facing surfaces.
+KinTunnel follows the two-service split locked in [ADR-0002](https://github.com/PascalAI2024/kintunnel/blob/main/adr/0002-two-service-admin-engine-split.md). One privileged service owns the host networking primitives; one unprivileged service owns authentication, audit, and the operator-facing surfaces.
 
 ```mermaid
 flowchart LR
@@ -358,4 +358,4 @@ Docker Compose is the default. Dokploy and Swarm are acceptable for a single-nod
 - Enterprise identity provider integration.
 - Multi-tenant admin delegation.
 
-See [PLAN-implementation.md](../PLAN-implementation.md) for the full Phase 1 / Phase 2 implementation plan and [PLAN.md](../PLAN.md) for the project-wide status board.
+See [PLAN-implementation.md](https://github.com/PascalAI2024/kintunnel/blob/main/PLAN-implementation.md) for the full Phase 1 / Phase 2 implementation plan and [PLAN.md](https://github.com/PascalAI2024/kintunnel/blob/main/PLAN.md) for the project-wide status board.

@@ -1,6 +1,6 @@
 # Privilege Model
 
-This document covers the Phase 1 implementation specifics of KinTunnel's security posture. For the broader security philosophy see [security-model.md](security/security-model.md). For threat-model and incident-response guidance, see [SECURITY.md](../SECURITY.md).
+This document covers the Phase 1 implementation specifics of KinTunnel's security posture. For the broader security philosophy see [security-model.md](security/security-model.md). For threat-model and incident-response guidance, see [SECURITY.md](https://github.com/PascalAI2024/kintunnel/blob/main/SECURITY.md).
 
 The privileged-side architecture is locked (2026-06-29): **Linux capabilities only, no root, no `docker.sock`, no host PID namespace.** This document explains what that means in practice and what an operator needs to defend against.
 
