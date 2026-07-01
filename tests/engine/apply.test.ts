@@ -286,10 +286,10 @@ describe("apply.ts", () => {
       const result = await executeApply({ state, dryRun: false });
 
       const recorded = execState.calls.map((call) => `${call.command} ${call.args.join(" ")}`);
-      const addIdx = recorded.findIndex((c) => c.startsWith("ip -|link add wg0 type wireguard"));
+      const addIdx = recorded.findIndex((c) => c.startsWith("ip link add wg0 type wireguard"));
       const setconfIdx = recorded.findIndex((c) => c.startsWith("wg setconf wg0 "));
-      const addrIdx = recorded.findIndex((c) => c.startsWith("ip -|addr replace 10.55.0.1/32 dev wg0"));
-      const upIdx = recorded.findIndex((c) => c.startsWith("ip -|link set dev wg0 mtu "));
+      const addrIdx = recorded.findIndex((c) => c.startsWith("ip addr replace 10.55.0.1/32 dev wg0"));
+      const upIdx = recorded.findIndex((c) => c.startsWith("ip link set dev wg0 mtu "));
 
       expect(addIdx).toBeGreaterThanOrEqual(0);
       expect(setconfIdx).toBeGreaterThan(addIdx);

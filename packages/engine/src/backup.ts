@@ -6,6 +6,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { atomicWriteFile, withFileLock } from "./state.js";
 import type { StateStore } from "./state.js";
+import { reconcile } from "./runtime.js";
 import pkg from "../../../package.json" with { type: "json" };
 import type {
   BackupManifest,
@@ -50,6 +51,7 @@ export interface BackupStorage {
     safetySnapshotId?: string;
     fromRevision?: number;
     applied: boolean;
+    reconciled: boolean;
     error?: string;
   }>;
   backupRestorePlan(snapshotId: string): Promise<BackupRestorePlan>;
@@ -92,9 +94,9 @@ export function createBackupStorage(config: EngineConfig, store: StateStore): Ba
   }
 
   async function ensureBackupDirs(): Promise<void> {
-    await fs.mkdir(backupDir, { recursive: true });
-    await fs.mkdir(tmpDir, { recursive: true });
-    await fs.mkdir(exportsDir, { recursive: true });
+    await fs.mkdir(backupDir, { recursive: true, mode: 0o700 });
+    await fs.mkdir(tmpDir, { recursive: true, mode: 0o700 });
+    await fs.mkdir(exportsDir, { recursive: true, mode: 0o700 });
   }
 
   async function readSnapshotManifest(snapshotId: string): Promise<BackupManifest> {
@@ -216,7 +218,7 @@ export function createBackupStorage(config: EngineConfig, store: StateStore): Ba
     const manifestPath = path.join(stagingDir, "manifest.json");
     const statePath = path.join(stagingDir, "state.json");
 
-    await fs.mkdir(stagingDir, { recursive: true });
+    await fs.mkdir(stagingDir, { recursive: true, mode: 0o700 });
     await atomicWriteFile(manifestPath, JSON.stringify(manifest, null, 2));
     await atomicWriteFile(statePath, stateBytes);
     await fs.rename(stagingDir, canonicalDir);
@@ -438,6 +440,7 @@ export function createBackupStorage(config: EngineConfig, store: StateStore): Ba
         }
 
         let applied = false;
+        let reconciled = false;
         let fromRevision: number | undefined;
         let errorMessage: string | undefined;
 
@@ -467,14 +470,29 @@ export function createBackupStorage(config: EngineConfig, store: StateStore): Ba
               }
             });
             await store.save(restoredState);
+
+            // `wg-quick down` above leaves the tunnel down until the host is
+            // brought back in sync with the restored state — reconcile now
+            // so a restore doesn't silently require a separate manual
+            // /v1/reconcile call to bring peers back online.
+            try {
+              const reconcileResult = await reconcile(config, restoredState);
+              reconciled = reconcileResult.ok && reconcileResult.applied;
+              if (!reconcileResult.ok) {
+                errorMessage = `Restored state, but post-restore reconcile reported errors: ${reconcileResult.errors.join("; ")}`;
+              }
+            } catch (reconcileErr) {
+              errorMessage = `Restored state, but post-restore reconcile failed: ${(reconcileErr as Error).message}`;
+            }
           }
 
           return {
             ok: applied,
             applied,
+            reconciled,
             safetySnapshotId,
             fromRevision,
-            error: undefined
+            error: errorMessage
           };
         } catch (err) {
           errorMessage = (err as Error).message;
@@ -497,6 +515,10 @@ export function createBackupStorage(config: EngineConfig, store: StateStore): Ba
                 }
               });
               await store.save(afterRecovery);
+              // Bring the host back to the known-good pre-restore state too
+              // — otherwise a failed restore leaves the tunnel down just
+              // like a successful one did before reconcile was added above.
+              await reconcile(config, afterRecovery).catch(() => undefined);
             } catch {
               // Recovery itself failed — surface the original error.
             }
@@ -616,7 +638,7 @@ export function createBackupStorage(config: EngineConfig, store: StateStore): Ba
 
         const stagingDir = path.join(tmpDir, `snap-${snapshotId}.${randomHex(4)}.staging`);
         const canonicalDir = snapshotDir(snapshotId);
-        await fs.mkdir(stagingDir, { recursive: true });
+        await fs.mkdir(stagingDir, { recursive: true, mode: 0o700 });
         await atomicWriteFile(path.join(stagingDir, "manifest.json"), JSON.stringify(manifest, null, 2));
         await atomicWriteFile(path.join(stagingDir, "state.json"), stateBytes);
         await fs.rename(stagingDir, canonicalDir);

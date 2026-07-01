@@ -192,14 +192,14 @@ Snapshots are atomic by design. They live under `KINTUNNEL_BACKUP_DIR` (default 
     snap-<uuidv7>.<random>.staging/
       manifest.json
       state.json
-  .lock                   # BSD flock target for create / restore
+  .lock                   # exclusive-lock target for create / restore
   exports/
     snap-<uuidv7>.json    # JSON-wrapped export
 ```
 
 ### Create algorithm
 
-1. Acquire `flock(/backups/.lock, LOCK_EX)` with `KINTUNNEL_BACKUP_LOCK_TIMEOUT_MS`
+1. Acquire exclusive lock on `/backups/.lock` (see [withFileLock](#withfilelock)), bounded by `KINTUNNEL_BACKUP_LOCK_TIMEOUT_MS`
 2. Generate `snapshot_id = uuidv7()`
 3. `mkdir staging/`, write `manifest.json` + `state.json`
 4. Compute SHA-256 of `state.json` and store it in `manifest.files[0].sha256`
@@ -230,7 +230,7 @@ Snapshots are atomic by design. They live under `KINTUNNEL_BACKUP_DIR` (default 
 2. If `force !== true`, take a safety snapshot of current `state.json` with `trigger: "pre-rotate"`. Return `safety_snapshot_id` in the response.
 3. Validate manifest version compatibility against current engine. Reject with `412` on mismatch.
 4. If `apply=false` (dry-run): compute `peer_changes` (`added`, `removed`, `modified`) and return a `BackupRestorePlan`. No state mutation.
-5. If `apply=true`: copy `state.json` to `dataDir/state.json.tmp.<rand>`, then `rename` to `state.json` (atomic). Emit `backup.restored` with `applied=true`.
+5. If `apply=true`: copy `state.json` to `dataDir/state.json.tmp.<rand>`, then `rename` to `state.json` (atomic). Emit `backup.restored` with `applied=true`, then run `reconcile()` against the restored state so the host (WireGuard interface + peers) is brought back in sync — otherwise the `wg-quick down` from step 5a would leave the tunnel down indefinitely. Reconcile failures here are reported in the response but do not undo the state restore.
 6. Release lock.
 
 A failed restore after step 5b leaves a `state.json.tmp.*` file. `StateStore.load()` removes stray `.tmp.*` files at startup (idempotent cleanup hook).
@@ -270,7 +270,7 @@ Each `appendEvent` call caps the buffer at 250 entries. Older events roll off th
 
 ### withFileLock
 
-`withFileLock(path, timeoutMs, async () => …)` wraps Node 22's native `FileHandle` flock. It serializes operations across processes — useful for backup creation and restore, which can race between manual API calls and any future cron-driven scheduler.
+`withFileLock(path, fn, {timeoutMs})` serializes callers contending for the same lock path — useful for backup creation and restore, which can race between manual API calls and any future cron-driven scheduler. See [Concurrency Model](#2-withfilelock-cross-process-locks) for the actual locking mechanism.
 
 ### Layout under `/var/lib/kintunnel`
 
@@ -284,7 +284,7 @@ Each `appendEvent` call caps the buffer at 250 entries. Older events roll off th
 
 /backups/
   snap-<uuid>/              # snapshots
-  .lock                     # flock target
+  .lock                     # exclusive-lock target
   exports/                  # JSON-wrapped exports
 ```
 
@@ -304,9 +304,11 @@ Audit events flow through two sinks:
 | `networking.*` (forwarding.enabled, masquerade.applied, forward.policy.applied, rolledback) | `networking.ts` |
 | `backup.*` (created, pruned, restored, exported, imported, deleted) | `backup.ts` |
 
-### Known gap (as of this wave)
+### Audit coverage
 
-Events emitted from `state.ts`, `apply.ts`, and `backup.ts` reach the **ring buffer** consistently, but a subset — peer lifecycle events emitted directly from `state.ts` — does **not** flow into the **persistent NDJSON** sink in the current implementation. Operators querying `GET /v1/audit?action=peer.created` against the durable log may see gaps. The reconcile path is fully covered. Wave 4 plans to close this seam.
+All audit-emitting call sites (`state.ts` peer/person lifecycle, `apply.ts`, `networking.ts`, `backup.ts`, `reconcile.completed`) persist to both the **ring buffer** and the **persistent NDJSON** sink — `StateStore.appendEvent` writes through to the configured `AuditSink` synchronously, so `GET /v1/audit?action=peer.created` against the durable log no longer has gaps.
+
+Known limitation: `apply.ts` and `networking.ts` route their own audit events through a process-wide module-level sink reference (`setApplyAuditSink`/`setNetworkingAuditSink`), not a per-instance sink the way `StateStore` receives one via its constructor. This only matters if a single process ever hosts more than one engine instance concurrently, which is not a supported topology today (see [Deployment Boundaries](#deployment-boundaries): one active node per tunnel).
 
 ## Concurrency Model
 
@@ -318,7 +320,7 @@ A single in-process FIFO queue in `state.ts` serializes all `save()` calls. Two 
 
 ### 2. withFileLock (cross-process locks)
 
-`withFileLock(path, timeoutMs, fn)` uses BSD flock via Node 22's native `FileHandle`. The engine uses two distinct lock files:
+`withFileLock(path, fn, {timeoutMs})` acquires an exclusive lock via atomic `open(path, "wx")` (Node's `fs/promises` has no flock primitive, so this is an advisory lock effective only against other callers going through this same function, not arbitrary external processes). The lock file's existence is the lock; release closes and unlinks it. A lock file untouched for more than 5 minutes is treated as abandoned by a crashed holder and cleared automatically, since Node has no portable way to check the liveness of an arbitrary holder PID. The engine uses two distinct lock files:
 
 - `/backups/.lock` — guards `backupCreate` and `backupRestore`. Backup operations acquire this lock first.
 - `/var/run/kintunnel-apply.lock` — guards the apply path inside `reconcile()`. The reconcile ticker holds this lock for the duration of `executeApply`.

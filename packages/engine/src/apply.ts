@@ -287,6 +287,7 @@ export async function executeApply(req: ApplyRequest): Promise<ApplyResult> {
             count_unchanged: activePeers.length - peerChanges.added.length - peerChanges.modified.length
           });
         } catch (error) {
+          await rollbackPlan(req.state, plan).catch(() => undefined);
           throw new ApplyError(
             "syncconf_failed",
             `wg syncconf failed: ${(error as Error).message}`,
@@ -309,6 +310,7 @@ export async function executeApply(req: ApplyRequest): Promise<ApplyResult> {
           });
         } catch (error) {
           if (error instanceof ApplyError) throw error;
+          await rollbackPlan(req.state, plan).catch(() => undefined);
           throw new ApplyError(
             "peer_remove_failed",
             `Failed to remove peer ${pubKey}: ${(error as Error).message}`,
@@ -516,11 +518,11 @@ async function execWg(args: string[]): Promise<{ stdout: string; stderr: string 
 }
 
 async function execIpLink(args: string[]): Promise<{ stdout: string; stderr: string }> {
-  return execHost("ip", ["-|link", ...args]);
+  return execHost("ip", ["link", ...args]);
 }
 
 async function execIpAddr(args: string[]): Promise<{ stdout: string; stderr: string }> {
-  return execHost("ip", ["-|addr", ...args]);
+  return execHost("ip", ["addr", ...args]);
 }
 
 async function execHost(

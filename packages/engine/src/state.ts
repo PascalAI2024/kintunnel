@@ -65,18 +65,23 @@ export async function atomicWriteFile(
   }
 }
 
+const LOCK_POLL_INTERVAL_MS = 50;
+// A lock file older than this is assumed abandoned by a crashed holder
+// (Node has no portable primitive to test liveness of an arbitrary PID)
+// and is cleared so the process doesn't wedge forever on a stale lock.
+const LOCK_STALE_AFTER_MS = 5 * 60 * 1000;
+
 /**
- * Acquire a BSD-style advisory file lock around `fn`. The lock is keyed by
- * the lockPath file — multiple processes contending for the same path will
- * serialize. Different lockPaths are independent. Implemented via
- * `FileHandle#flock` (Node >= 22). The lock is released when the returned
- * promise settles (success or failure) by closing the underlying fd.
+ * Acquire an exclusive file lock around `fn`, keyed by `lockPath` — multiple
+ * callers contending for the same path serialize; different lockPaths are
+ * independent. Implemented with atomic `open(lockPath, "wx")` (fails with
+ * `EEXIST` if the file already exists), not an OS-level flock: Node's
+ * `fs/promises` has no flock primitive, so acquisition is advisory and only
+ * effective against other callers that go through this same function.
  *
- * NOTE: `flock` is acquired by the calling process; concurrent calls with
- * the same path from the same process block on each other as expected.
- * The `timeoutMs` bounds the wait via a race; if it fires we throw with
- * `code = "ELOCKTIMEOUT"` and release. Callers (e.g. backup.ts) should
- * map that to HTTP 409.
+ * The `timeoutMs` bounds the wait; if it elapses without acquiring the lock
+ * we throw with `code = "ELOCKTIMEOUT"`. Callers (e.g. backup.ts) should map
+ * that to HTTP 409.
  */
 export async function withFileLock<T>(
   lockPath: string,
@@ -84,36 +89,41 @@ export async function withFileLock<T>(
   options: { timeoutMs: number }
 ): Promise<T> {
   await fs.mkdir(path.dirname(lockPath), { recursive: true });
-  const fd = await fs.open(lockPath, "w");
-  try {
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        const err = new Error(
+  const deadline = Date.now() + options.timeoutMs;
+
+  for (;;) {
+    try {
+      const fd = await fs.open(lockPath, "wx");
+      try {
+        await fd.writeFile(String(process.pid));
+      } catch {
+        // Best-effort diagnostic only — lock validity doesn't depend on it.
+      }
+      try {
+        return await fn();
+      } finally {
+        await fd.close().catch(() => undefined);
+        await fs.unlink(lockPath).catch(() => undefined);
+      }
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== "EEXIST") throw err;
+
+      const stat = await fs.stat(lockPath).catch(() => undefined);
+      if (stat && Date.now() - stat.mtimeMs > LOCK_STALE_AFTER_MS) {
+        await fs.unlink(lockPath).catch(() => undefined);
+        continue;
+      }
+
+      if (Date.now() >= deadline) {
+        const timeoutErr = new Error(
           `Timed out acquiring file lock at ${lockPath} after ${options.timeoutMs}ms`
         );
-        (err as NodeJS.ErrnoException).code = "ELOCKTIMEOUT";
-        reject(err);
-      }, options.timeoutMs);
-    });
-    const acquire = (async () => {
-      // `FileHandle#flock` is added in Node 22.0.0. The runtime is locked
-      // to >=22 (see root package.json `engines.node`), so this call is
-      // safe at runtime; the @types/node version in devDeps may not yet
-      // declare the method, hence the narrow cast.
-      await (fd as unknown as { flock(): Promise<void> }).flock();
-    })();
-    try {
-      await Promise.race([acquire, timeoutPromise]);
-    } finally {
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+        (timeoutErr as NodeJS.ErrnoException).code = "ELOCKTIMEOUT";
+        throw timeoutErr;
+      }
+      await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_INTERVAL_MS));
     }
-    return await fn();
-  } finally {
-    // Closing the fd releases the BSD flock automatically; the lock
-    // survives even if acquisition raced with timeout because flock is
-    // held on the kernel fd object, not the JS Promise.
-    await fd.close().catch(() => undefined);
   }
 }
 
@@ -353,7 +363,7 @@ export class StateStore {
             expired.push(peer.id);
             const daysOverdue = Math.abs(daysRemaining);
             this.appendEvent(state, {
-              action: "peer.expired.auto_revoked" as unknown as AuditAction,
+              action: "peer.expired.auto_revoked",
               actor,
               targetId: peer.id,
               targetName: peer.name,
@@ -386,7 +396,7 @@ export class StateStore {
             expired.push(peer.id);
             const daysOverdue = Math.abs(daysRemaining);
             this.appendEvent(state, {
-              action: "peer.expired.warned" as unknown as AuditAction,
+              action: "peer.expired.warned",
               actor,
               targetId: peer.id,
               targetName: peer.name,
@@ -417,7 +427,7 @@ export class StateStore {
           if (shouldWarn) {
             warnedNext[peer.id] = nowIso;
             this.appendEvent(state, {
-              action: "peer.expiring.warned" as unknown as AuditAction,
+              action: "peer.expiring.warned",
               actor,
               targetId: peer.id,
               targetName: peer.name,
@@ -478,7 +488,7 @@ export class StateStore {
 
   async updatePerson(
     id: string,
-    patch: { displayName?: string; notes?: string; status?: PersonStatus }
+    patch: { displayName?: string; notes?: string | null; status?: PersonStatus }
   ): Promise<PersonRecord> {
     return this.update((state) => {
       const person = state.persons.find((candidate) => candidate.id === id);

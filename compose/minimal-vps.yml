@@ -14,6 +14,11 @@ services:
     restart: unless-stopped
     environment:
       KINTUNNEL_DRY_RUN: "false"
+      # Required whenever KINTUNNEL_DRY_RUN=false — without it the engine
+      # throws on startup (see packages/engine/src/env.ts). This overlay's
+      # whole purpose is to run for real on a single VPS, so both flags flip
+      # together.
+      KINTUNNEL_ENABLE_HOST_NETWORKING: "true"
     devices:
       - /dev/net/tun:/dev/net/tun
     sysctls:

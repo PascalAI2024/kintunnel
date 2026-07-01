@@ -6,6 +6,10 @@ export type AuditAction =
   | "peer.revoked"
   | "peer.deleted"
   | "reconcile.completed"
+  // P3.4 expiry automation:
+  | "peer.expired.auto_revoked"
+  | "peer.expired.warned"
+  | "peer.expiring.warned"
   // P1.1 apply path:
   | "apply.interface.created"
   | "apply.interface.reconfigured"

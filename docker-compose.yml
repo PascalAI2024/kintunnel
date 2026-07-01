@@ -65,7 +65,7 @@ services:
       KINTUNNEL_BACKUP_DIR: /backups
       KINTUNNEL_BACKUP_RETENTION_COUNT: 7
       KINTUNNEL_BACKUP_LOCK_TIMEOUT_MS: 5000
-      KINTUNNEL_NAT_APPLY: "true"
+      KINTUNNEL_NAT_APPLY: ${KINTUNNEL_NAT_APPLY:-false}
     volumes:
       - ./config:/etc/kintunnel:ro
       - kintunnel-data:/var/lib/kintunnel

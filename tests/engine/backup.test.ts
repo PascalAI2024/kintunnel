@@ -243,6 +243,10 @@ describe("backup.ts", () => {
       );
       expect(restoreResult.applied).toBe(true);
       expect(restoreResult.safetySnapshotId).toBeDefined();
+      // Restoring with apply:true must bring the host back in sync (or, in
+      // dry-run test config, at least attempt and succeed a reconcile) —
+      // otherwise the tunnel is left down after every restore.
+      expect(restoreResult.reconciled).toBe(true);
 
       const postRestoreCount = (await storage.backupList()).length;
       expect(postRestoreCount).toBe(preRestoreCount + 1); // safety snapshot added

@@ -19,7 +19,7 @@ All variables use the `KINTUNNEL_*` namespace. The `*_FILE` suffix form reads fr
 | `KINTUNNEL_DATA_DIR` | path | `/var/lib/kintunnel` | Where `state.json` lives. |
 | `KINTUNNEL_BACKUP_DIR` | path | `/backups` | Snapshot directory. Must be on the same filesystem as `KINTUNNEL_DATA_DIR` for atomic rename. |
 | `KINTUNNEL_BACKUP_RETENTION_COUNT` | int (1-1000) | `10` | Number of snapshots kept by the retention pruner. |
-| `KINTUNNEL_BACKUP_LOCK_TIMEOUT_MS` | int (1000-300000) | `30000` | Max wait for `flock(/backups/.lock)`. |
+| `KINTUNNEL_BACKUP_LOCK_TIMEOUT_MS` | int (1000-300000) | `30000` | Max wait acquiring the exclusive lock on `/backups/.lock`. |
 | `KINTUNNEL_APPLY_BOOTSTRAP_TIMEOUT_MS` | int (1000-120000) | `15000` | Max wait for the `ip link add → wg setconf → ip addr → ip link up` cold-start sequence. |
 | `KINTUNNEL_LOG_LEVEL` | enum (`debug` \| `info` \| `warn` \| `error`) | `info` | NDJSON log threshold. Set `debug` for verbose apply path tracing. |
 | `KINTUNNEL_AUDIT_LOG_ROTATION_BYTES` | int | `5242880` | Persistent audit log rotates when it exceeds this size. |

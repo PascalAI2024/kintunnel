@@ -232,7 +232,7 @@ export async function applyNetworking(
         reason: "rule_insert_failed",
         rules_removed: intendedRemoval.join(",") || "<none>"
       });
-      await rollbackNetworking(config, "rule_insert_failed");
+      await rollbackNetworking(config, "rule_insert_failed", intendedRemoval);
     }
     return buildResult({
       ok: false,
@@ -270,19 +270,28 @@ export async function applyNetworking(
 }
 
 /**
- * Best-effort removal of every rule we own. Iterates the four comment
- * markers we manage and issues `iptables -D` with the full rule spec. A
- * non-zero exit is ignored — the rule may already be absent (idempotent
- * rollback) or the table may be unreadable in this context; either way the
- * next apply call will recompute the desired state.
+ * Best-effort removal of the rules newly inserted by the failing
+ * `applyNetworking` call (identified by `markersToRemove`). Only those
+ * markers are targeted — rules that already existed before this call (and
+ * therefore weren't touched by it) are left alone, so an unrelated later
+ * rule failing to insert doesn't tear down earlier rules that already
+ * converged correctly. A non-zero `-D` exit is ignored — the rule may
+ * already be absent (idempotent rollback) or the table may be unreadable
+ * in this context; either way the next apply call will recompute the
+ * desired state.
  *
  * Audit emission is the caller's responsibility (this function does not have
  * state access in its signature). The typical call site in `applyNetworking`
  * emits `networking.rolledback` immediately before invoking this.
  */
-export async function rollbackNetworking(config: EngineConfig, _reason: string): Promise<void> {
+export async function rollbackNetworking(
+  config: EngineConfig,
+  _reason: string,
+  markersToRemove: string[]
+): Promise<void> {
   const egressIface = config.wgEgressInterface ?? await detectEgressInterface() ?? "unknown";
-  const specs = buildRuleSpecs(config, egressIface);
+  const markers = new Set(markersToRemove);
+  const specs = buildRuleSpecs(config, egressIface).filter((spec) => markers.has(spec.marker));
   for (const spec of specs) {
     const args = [
       "-D",

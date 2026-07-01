@@ -28,7 +28,7 @@ This project follows the spirit of Keep a Changelog and intends to use semantic 
 - Persistent NDJSON audit log with size-based rotation, queryable via GET /v1/audit.
 - 6 new KINTUNNEL_* env vars: NAT_APPLY, BACKUP_DIR, BACKUP_RETENTION_COUNT, BACKUP_LOCK_TIMEOUT_MS, AUDIT_LOG_ROTATION_BYTES, AUDIT_LOG_RETENTION_COUNT (LOG_LEVEL added separately).
 - Engine container hardening: cap_drop ALL + cap_add [NET_ADMIN, NET_RAW], read_only root, tmpfs /tmp + /run, no-new-privileges, kintunnel-backups named volume. Mirrored across base compose, minimal-vps overlay, and dokploy-swarm reference.
-- atomicWriteFile + withFileLock (BSD flock via Node 22 native FileHandle) helpers in state.ts.
+- atomicWriteFile + withFileLock (exclusive-lock-file based, cross-process) helpers in state.ts.
 
 ### Changed
 

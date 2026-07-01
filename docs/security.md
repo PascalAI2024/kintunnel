@@ -115,7 +115,7 @@ The engine emits audit events to two sinks:
 1. **In-memory ring buffer** (`state.events`, last 250) — fast; surfaced via the admin UI's recent activity view. Persists as part of `state.json`.
 2. **Persistent NDJSON** (`/var/lib/kintunnel/audit.log*`) — rotated by size (`KINTUNNEL_AUDIT_LOG_ROTATION_BYTES`, default 5 MiB) with up to `KINTUNNEL_AUDIT_LOG_RETENTION_COUNT` files kept (default 10). Queryable via `GET /v1/audit?action=&actor=&since=`.
 
-Events from the apply path, networking, and backup lifecycle land in **both** sinks. Events from `state.ts` peer lifecycle (`peer.created`, `peer.revoked`, `peer.deleted`) currently land in the ring buffer; the persistent NDJSON coverage is partial — see [architecture.md Known gap](architecture.md#known-gap-as-of-this-wave). Operators should treat the ring buffer as the authoritative source for peer lifecycle until Wave 4 closes this seam.
+Events from the apply path, networking, backup lifecycle, and `state.ts` peer lifecycle (`peer.created`, `peer.revoked`, `peer.deleted`) all land in **both** sinks — see [architecture.md Audit coverage](architecture.md#audit-coverage) for the one remaining limitation (a process-wide, not per-instance, sink reference in `apply.ts`/`networking.ts`, which doesn't matter under the single-active-node deployment model this project requires).
 
 ## Threat Model
 

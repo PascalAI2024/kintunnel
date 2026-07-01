@@ -323,13 +323,15 @@ export function createApp(config: EngineConfig): express.Express {
 
   api.get("/peers/:id/config", async (req, res, next) => {
     try {
-      const { clientConfig, auditRecord } = await store.update((state) => {
+      const { clientConfig } = await store.update((state) => {
         const peer = state.peers.find((candidate) => candidate.id === req.params.id);
         if (!peer || !isPeerActive(peer)) {
           throw new ValidationError("Peer not found.", { id: ["not found or not active"] });
         }
 
-        const auditRecord = store.appendEvent(state, {
+        // appendEvent persists to the durable audit sink synchronously —
+        // no separate audit.append() needed here (see StateStore.appendEvent).
+        store.appendEvent(state, {
           action: "peer.config.exported",
           targetId: peer.id,
           targetName: peer.name,
@@ -340,21 +342,9 @@ export function createApp(config: EngineConfig): express.Express {
         });
 
         return {
-          clientConfig: renderClientConfig(peer, state.server),
-          auditRecord
+          clientConfig: renderClientConfig(peer, state.server)
         };
       });
-
-      // Fire-and-forget audit append for config exports (high-volume, low durability need).
-      void (async () => {
-        try {
-          await audit.append(auditRecord);
-        } catch (error) {
-          auditLogger.warn("audit append failed for peer.config.exported", {
-            error: error instanceof Error ? error.message : String(error)
-          });
-        }
-      })();
 
       setSensitiveHeaders(res);
       res.type("text/plain").send(clientConfig);
@@ -399,14 +389,15 @@ export function createApp(config: EngineConfig): express.Express {
   api.post("/reconcile", async (_req, res, next) => {
     try {
       const startedAt = Date.now();
-      let auditRecord: AuditEvent | null = null;
       let reconcileResult;
       try {
         const result = await store.update(async (state) => {
           const r = await reconcile(config, state);
           state.lastReconcile = r;
           state.revision += 1;
-          auditRecord = store.appendEvent(state, {
+          // appendEvent persists to the durable audit sink synchronously —
+          // no separate audit.append() needed here (see StateStore.appendEvent).
+          store.appendEvent(state, {
             action: "reconcile.completed",
             metadata: {
               ok: r.ok,
@@ -428,16 +419,6 @@ export function createApp(config: EngineConfig): express.Express {
       reconcileRunsTotal.inc({ result: reconcileResult.ok ? "ok" : "error" });
       reconcileDurationSeconds.observe(elapsedSeconds);
       stateRevisionGauge.set(reconcileResult.revision);
-      // Durable audit append for reconcile.completed per spec.
-      if (auditRecord) {
-        try {
-          await audit.append(auditRecord);
-        } catch (error) {
-          auditLogger.warn("audit append failed for reconcile.completed", {
-            error: error instanceof Error ? error.message : String(error)
-          });
-        }
-      }
       res.status(reconcileResult.ok ? 200 : 409).json({ reconcile: reconcileResult });
     } catch (error) {
       next(error);
@@ -525,7 +506,9 @@ export function createApp(config: EngineConfig): express.Express {
         restored: true,
         safety_snapshot_id: result.safetySnapshotId,
         from_revision: result.fromRevision,
-        applied: result.applied
+        applied: result.applied,
+        reconciled: result.reconciled,
+        error: result.error
       });
     } catch (error) {
       backupRestoresTotal.inc({ result: "error" });
@@ -602,9 +585,6 @@ export function createApp(config: EngineConfig): express.Express {
         notes?: string | null;
         status?: "active" | "archived";
       };
-      // The StateStore type is `notes?: string`, but the implementation
-      // accepts `null` as the explicit "clear notes" sentinel. Build the
-      // patch in our wider shape then cast at the boundary.
       const patch: {
         displayName?: string;
         notes?: string | null;
@@ -620,10 +600,7 @@ export function createApp(config: EngineConfig): express.Express {
       if (body.status === "active" || body.status === "archived") {
         patch.status = body.status;
       }
-      const person = await store.updatePerson(
-        req.params.id,
-        patch as Parameters<typeof store.updatePerson>[1]
-      );
+      const person = await store.updatePerson(req.params.id, patch);
       res.json({ person: sanitizePerson(person) });
     } catch (error) {
       next(error);
