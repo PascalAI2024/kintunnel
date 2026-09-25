@@ -1,0 +1,93 @@
+# CodeRabbit configuration for kintunnel
+# Schema: https://coderabbit.ai/integrations/schema.v2.json
+# Docs:   https://docs.coderabbit.ai/reference/configuration
+#
+# KinTunnel is a Docker-native family VPN manager for WireGuard: a
+# TypeScript npm workspace (packages/engine, packages/admin) whose engine
+# shells out to iptables/wg and touches real host networking, plus an
+# admin UI that gates peer lifecycle behind token auth. This config is
+# tuned so CodeRabbit reviews stay focused on those safety-relevant paths
+# instead of generic style noise, since there is no committed
+# ESLint/Biome config for it to defer to.
+
+language: en-US
+
+reviews:
+  profile: chill # matches CodeRabbit's default; pinned so it doesn't drift to `assertive`
+  request_changes_workflow: false # solo-maintained repo; never let the bot gate merges
+
+  auto_review:
+    enabled: true
+    drafts: false
+
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+
+  # Real change from CodeRabbit's default ([]): keep reviews off generated
+  # output, lockfiles, and static docs assets/screenshots.
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/dist/**"
+    - "!**/build/**"
+    - "!package-lock.json"
+    - "!**/package-lock.json"
+    - "!docs/assets/**"
+    - "!**/*.svg"
+    - "!**/*.png"
+    - "!site/**" # mkdocs build output, if ever committed
+
+  # Real change from CodeRabbit's default ([]): the engine touches real
+  # host networking (iptables, wg syncconf) and the admin UI gates peer
+  # lifecycle behind token auth, so those two packages get much stricter
+  # instructions than the docs/scripts around them.
+  path_instructions:
+    - path: "packages/engine/src/**"
+      instructions: >
+        This package shells out to iptables and wg to manage real host
+        networking (NAT/firewall rules, WireGuard peer config, apply/
+        rollback). Flag any command construction built from unsanitized
+        input (shell injection risk), any iptables/wg mutation that is not
+        idempotent (missing `-C`/dry-run pre-check before `-A`/apply), any
+        code path that can leave state changed on disk but not applied (or
+        vice versa) without rollback, and any place that skips the
+        KINTUNNEL_DRY_RUN guard. This is more important than style.
+
+    - path: "packages/admin/src/**"
+      instructions: >
+        This is the admin UI and its API layer, gated by token auth. Flag
+        any endpoint or UI action that mutates peer state without
+        confirming the auth check runs first, any place a WireGuard
+        private key or admin token could end up in a log line, HTTP
+        response body, or client-side bundle, and any XSS/CSRF gap in
+        forms that accept peer names or config.
+
+    - path: "tests/**"
+      instructions: >
+        Focus on coverage of edge cases (dry-run vs apply divergence,
+        rollback after a failed apply, drift detection, peer revoke then
+        delete, backup/restore integrity) rather than style or naming.
+
+    - path: "scripts/*.sh"
+      instructions: >
+        These are operational shell scripts (backup, restore, doctor,
+        client generation) run against a live VPS. Flag unquoted variable
+        expansions, missing `set -euo pipefail`, and any secret (token,
+        private key) that could be echoed to stdout or a log file.
+
+  tools:
+    gitleaks:
+      enabled: true
+    shellcheck:
+      enabled: true
+    # No ESLint/Biome config is committed to this repo, so let it fall back
+    # to generic rules only if that changes; disabled for now to avoid
+    # noise from rules the project never opted into.
+    eslint:
+      enabled: false
+    biome:
+      enabled: false
+
+chat:
+  auto_reply: true
