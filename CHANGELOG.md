@@ -48,7 +48,10 @@ This project follows the spirit of Keep a Changelog and intends to use semantic 
 ### Fixed
 
 - README "Not finished" section: 4 of the 5 listed gaps are now implemented. The remaining gap (live VPS validation) requires a self-hosted runner.
+- Dependency audit: `body-parser` 1.20.9, `qs` 6.17.1, `source-map-js` 1.2.2, `vite` 8.3.6 and `vitest` 4.1.12. The `body-parser` override that pinned every copy to 1.x is gone, so Express 5 gets `body-parser` 2.x again.
+- README quick start now says the engine test suite needs Linux or WSL, which is what the suite has always assumed.
 
 ### Security
 
 - Added initial security reporting guidance.
+- `npm audit --audit-level=moderate` and the weekly Security workflow report no vulnerabilities.

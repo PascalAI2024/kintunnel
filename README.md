@@ -9,9 +9,7 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
 </p>
 
-KinTunnel is an original, Docker-native family VPN manager for WireGuard deployments.
-
-It is built for one simple job: give trusted people a private VPN exit through a VPS without turning the project into an enterprise mesh networking platform. Sensible. Almost suspiciously so.
+KinTunnel is a Docker-based manager for a WireGuard server on one VPS. You add a peer per person or device, hand out a QR code or config file, and revoke access from a token-protected admin UI.
 
 <p align="center">
   <img src="docs/assets/screenshots/admin-dashboard.png" alt="KinTunnel admin dashboard showing peer list, engine health, and recent activity" width="820">
@@ -19,14 +17,12 @@ It is built for one simple job: give trusted people a private VPN exit through a
 
 ## Why KinTunnel
 
-- One VPS.
-- One WireGuard server.
-- One peer per person or device.
+- One VPS, one WireGuard server, one peer per person or device.
 - QR-code and config-based onboarding.
 - A private admin UI for lifecycle work.
 - Docker Compose first, with a Dokploy/Swarm reference for single-node deployments.
 
-KinTunnel is not a hosted VPN provider, a WireGuard replacement, a corporate zero-trust suite, or a `wg-easy` fork.
+You run it yourself. There is no hosted service, and the project stays out of mesh networking, zero-trust suites and `wg-easy` territory.
 
 ## Current Status
 
@@ -69,6 +65,8 @@ KINTUNNEL_ENV=development KINTUNNEL_ADMIN_TOKEN=dev-admin-token-change-me KINTUN
 ```
 
 Open `http://127.0.0.1:8080` and sign in with the token.
+
+The `npm test` step covers the admin UI and the process-level integration tests everywhere. The engine suite drives temporary files under `/var/run/kintunnel`, so run the full suite on Linux or WSL.
 
 ## Docker From Source
 
@@ -175,7 +173,7 @@ The research memo is retained as a historical note: [VPN Research Memo](docs/vpn
 
 ## Security Summary
 
-This project manages VPN access. Boring security is not optional.
+This project manages VPN access, so the admin UI and the peer configs deserve the same care as any other private key.
 
 - Create one peer per person or device.
 - Revoke lost devices immediately.
